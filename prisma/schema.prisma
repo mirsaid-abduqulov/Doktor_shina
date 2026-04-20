@@ -1,0 +1,37 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Admin {
+  id        String    @id @default(uuid())
+  telegram_id      BigInt   @unique // Telegram ID katta son bo'lishi mumkin
+  fullName  String
+  createdAt DateTime @default(now())
+}
+
+model Tire {
+  id     String     @id @default(uuid())
+  name   String // Masalan: Lassa Multiways
+  size   String // Masalan: 205/55 R16
+  price  Float // Narxi
+  count  Int     @default(0) // Ombor qoldig'i
+  photos Photo[] // Rasmlar URL yoki FileID lari massivi
+
+  // Tashqi kalitlar
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([size]) // Qidiruvni tezlashtirish uchun o'lchamga indeks
+}
+
+model Photo {
+  id       String    @id @default(uuid())
+  publicId String
+  url      String
+  tire     Tire   @relation(fields: [tireId], references: [id], onDelete: Cascade)
+  tireId   String
+}
