@@ -1,18 +1,24 @@
-import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, OnApplicationBootstrap, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 
 @Injectable()
-export class KeepAliveService implements OnModuleInit {
+export class KeepAliveService implements OnApplicationBootstrap {
   private readonly logger = new Logger(KeepAliveService.name);
 
   constructor(private readonly configService: ConfigService) {}
 
-  onModuleInit() {
+  onApplicationBootstrap() {
     const appUrl = this.configService.get<string>('APP_URL') || 'https://shina-bot.onrender.com';
     const url = `${appUrl}/tires/health`;
     
-    // Har 5 daqiqada so'rov yuboradi
+    // Loyiha to'liq yurguncha 30 soniya kutib, keyin pingni boshlaymiz
+    setTimeout(() => {
+      this.startPing(url);
+    }, 30000);
+  }
+
+  private startPing(url: string) {
     setInterval(async () => {
       try {
         await axios.get(url);
@@ -20,6 +26,6 @@ export class KeepAliveService implements OnModuleInit {
       } catch (e) {
         this.logger.error(`Keep-alive pingda xato (${url}): ${e.message}`);
       }
-    }, 1000 * 60 * 5); 
+    }, 1000 * 60 * 5); // Har 5 daqiqada
   }
 }
