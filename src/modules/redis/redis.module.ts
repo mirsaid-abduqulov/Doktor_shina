@@ -7,6 +7,7 @@ import { RedisService } from './redis.service';
     IoRedisModule.forRoot({
       type: 'single',
       url: process.env.REDIS_URL || 'redis://localhost:6379',
+      
     }),
   ],
   providers: [RedisService],
