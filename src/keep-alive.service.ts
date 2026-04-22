@@ -9,23 +9,36 @@ export class KeepAliveService implements OnApplicationBootstrap {
   constructor(private readonly configService: ConfigService) {}
 
   onApplicationBootstrap() {
-    const appUrl = this.configService.get<string>('APP_URL') || 'https://shina-bot.onrender.com';
+    const appUrl = this.configService.get<string>('APP_URL');
+    
+    // Agar APP_URL bo'lmasa, ping ishlamasin (masalan, localhostda kerakmas)
+    if (!appUrl) {
+      this.logger.warn('APP_URL topilmadi, Keep-alive ping yoqilmadi.');
+      return;
+    }
+
     const url = `${appUrl}/tires/health`;
     
-    // Loyiha to'liq yurguncha 30 soniya kutib, keyin pingni boshlaymiz
+    this.logger.log(`Keep-alive xizmati ishga tushdi. URL: ${url}`);
+
+    // Loyiha to'liq yurguncha kutib, keyin boshlaymiz
     setTimeout(() => {
       this.startPing(url);
     }, 30000);
   }
 
   private startPing(url: string) {
+    // 13 daqiqa (780,000 ms) - Render limitiga mos va xavfsiz
+    const intervalTime = 1000 * 60 * 13; 
+
     setInterval(async () => {
       try {
-        await axios.get(url);
-        this.logger.log(`Keep-alive ping muvaffaqiyatli: ${url}`);
+        // timeout qo'shish shart, aks holda so'rov osilib qolsa resurs yeydi
+        await axios.get(url, { timeout: 5000 }); 
+        this.logger.log('Keep-alive ping muvaffaqiyatli.');
       } catch (e) {
-        this.logger.error(`Keep-alive pingda xato (${url}): ${e.message}`);
+        this.logger.error(`Keep-alive xatosi: ${e.message}`);
       }
-    }, 1000 * 60 * 3); // Har 3 daqiqada
+    }, intervalTime);
   }
 }
