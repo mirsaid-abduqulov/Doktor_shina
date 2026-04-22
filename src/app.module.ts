@@ -7,6 +7,7 @@ import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { MulterModule } from '@nestjs/platform-express';
 import { MediaModule } from './modules/media/media.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { KeepAliveService } from './keep-alive.service';
 
 @Module({
   imports: [
@@ -26,6 +27,6 @@ import { RedisModule } from './modules/redis/redis.module';
     MediaModule,
   ],
   controllers: [],
-  providers: [],
+  providers: [KeepAliveService],
 })
 export class AppModule {}

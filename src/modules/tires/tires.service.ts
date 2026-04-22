@@ -1,5 +1,5 @@
 // tires.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Get, Injectable, NotFoundException } from '@nestjs/common';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateTireDto } from './dto/create-tire.dto';
 import { PrismaService } from 'src/core/database/prisma.service';
@@ -11,7 +11,7 @@ export class TiresService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly cloudinary: CloudinaryService,
-  ) {}
+  ) { }
 
   /**
    * Telegramdan kelgan rasm bufferini Cloudinary-ga yuklash
@@ -60,11 +60,11 @@ export class TiresService {
     return this.prisma.tire.findMany({
       where: query
         ? {
-            OR: [
-              { name: { contains: query, mode: 'insensitive' } },
-              { size: { contains: query, mode: 'insensitive' } },
-            ],
-          }
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+            { size: { contains: query, mode: 'insensitive' } },
+          ],
+        }
         : {},
       orderBy: { createdAt: 'desc' },
     });
@@ -119,4 +119,6 @@ export class TiresService {
     // Cloudinary-ga yuklash va tayyor natijani olish
     return this.cloudinary.uploadFromBuffer(buffer, 'tires');
   }
+
+  
 }
