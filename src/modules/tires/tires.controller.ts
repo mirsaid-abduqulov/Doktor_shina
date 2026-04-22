@@ -31,4 +31,9 @@ export class TiresController {
   async createTire(@Body() body: CreateTireDto) {
     return await this.tiresService.create(body);
   }
+
+  @Get('health')
+  healthCheck() {
+    return 'ok';
+  }
 }
