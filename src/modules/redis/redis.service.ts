@@ -3,6 +3,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 
 export interface BotTireData {
+  tire_id?: string;
   name?: string;
   size?: string;
   price?: number;

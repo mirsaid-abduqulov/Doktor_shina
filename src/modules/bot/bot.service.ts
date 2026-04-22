@@ -2,6 +2,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Action, Ctx, InjectBot, On, Start, Update } from 'nestjs-telegraf';
@@ -20,7 +21,7 @@ export class BotService {
     private readonly configService: ConfigService,
     private readonly mediaservice: MediaService,
     private readonly redis: RedisService,
-  ) { }
+  ) {}
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
@@ -44,6 +45,7 @@ export class BotService {
 
   @On('text')
   async onText(@Ctx() ctx: Context) {
+    // 1. Dastlabki tekshiruvlar
     if (
       !ctx.from ||
       !('message' in ctx.update) ||
@@ -51,11 +53,12 @@ export class BotService {
     ) {
       return;
     }
+
     const tgId = BigInt(ctx.from.id);
     const text = ctx.update.message.text;
     const state = await this.redis.getUserState(tgId);
 
-    // 1. Admin shina qo'shishni boshlashi
+    // 2. Admin shina qo'shishni boshlashi
     if (text === "➕ Yangi shina qo'shish") {
       const isAdmin = await this.getAdminByTgId(tgId);
       if (isAdmin) {
@@ -67,24 +70,87 @@ export class BotService {
           'Yangi shina nomini kiriting:',
           Markup.keyboard([['❌ Bekor qilish']]).resize(),
         );
+        return; // Return faqat matn yuborilgandan keyin
+      }
+    }
+
+    // 3. Bekor qilish logikasi
+    if (text === '❌ Bekor qilish' && state) {
+      await this.redis.deleteUserState(tgId);
+      const isAdmin = await this.getAdminByTgId(tgId);
+
+      const replyMarkup = isAdmin
+        ? Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize()
+        : Markup.removeKeyboard();
+
+      await ctx.reply('Jarayon bekor qilindi.', replyMarkup);
+      return;
+    }
+
+    // 4. SONINI O'ZGARTIRISH (Increment/Decrement) mantiqi
+    if (
+      state &&
+      (state.step === 'WAIT_INC_COUNT' || state.step === 'WAIT_DEC_COUNT')
+    ) {
+      // text ni yuqorida allaqachon olganmiz
+      const countChange = Number(text.trim());
+
+      if (isNaN(countChange) || countChange <= 0) {
+        await ctx.reply(
+          '⚠️ Xatolik: Iltimos, faqat musbat raqam kiriting!\n\nMisol: 5, 10, 20',
+          Markup.keyboard([['❌ Bekor qilish']]).resize(),
+        );
+        return; // Bu yerda return qilish shart, pastga tushib ketmasligi uchun
+      }
+
+      const tireId = state.data.tire_id;
+      if (!tireId) {
+        await this.redis.deleteUserState(tgId);
+        await ctx.reply(
+          "❌ Shina ID topilmadi, iltimos qaytadan urinib ko'ring.",
+        );
+        return;
+      }
+
+      const isIncrement = state.step === 'WAIT_INC_COUNT';
+
+      try {
+        if (!isIncrement) {
+          const currentTire = await this.prisma.tire.findUnique({
+            where: { id: tireId },
+          });
+          if (currentTire && currentTire.count < countChange) {
+            await ctx.reply(
+              `❌ Xatolik!\nOmborda bor-yog'i ${currentTire.count} ta shina bor.\nSiz esa ${countChange} tani ayirmoqchisiz.`,
+              Markup.keyboard([['❌ Bekor qilish']]).resize(),
+            );
+            return;
+          }
+        }
+
+        await this.prisma.tire.update({
+          where: { id: tireId },
+          data: {
+            count: isIncrement
+              ? { increment: countChange }
+              : { decrement: countChange },
+          },
+        });
+
+        await this.redis.deleteUserState(tgId);
+        await ctx.reply(
+          `✅ Muvaffaqiyatli bajarildi!\nShina soni ${countChange} taga ${isIncrement ? 'oshirildi' : 'kamaytirildi'}.`,
+          Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize(),
+        );
+        return;
+      } catch (error) {
+        console.error('Update error:', error);
+        await ctx.reply('❌ Bazaga yozishda texnik xatolik yuz berdi.');
         return;
       }
     }
 
-    // 2. Bekor qilish logikasi
-    if (text === '❌ Bekor qilish' && state) {
-      await this.redis.deleteUserState(tgId);
-      const isAdmin = await this.getAdminByTgId(tgId);
-      await ctx.reply(
-        'Jarayon bekor qilindi.',
-        isAdmin
-          ? Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize()
-          : Markup.removeKeyboard(),
-      );
-      return;
-    }
-
-    // 3. Shina qo'shish steplari
+    // 5. Shina qo'shish steplari
     if (state && state.step.startsWith('WAIT_')) {
       switch (state.step) {
         case 'WAIT_NAME':
@@ -92,14 +158,14 @@ export class BotService {
           state.step = 'WAIT_SIZE';
           await this.redis.setUserState(tgId, state);
           await ctx.reply("O'lchamini kiriting (Masalan: 205/55 R16):");
-          return;
+          break;
 
         case 'WAIT_SIZE':
           state.data.size = text;
           state.step = 'WAIT_PRICE';
           await this.redis.setUserState(tgId, state);
           await ctx.reply('Narxini kiriting (faqat raqam):');
-          return;
+          break;
 
         case 'WAIT_PRICE':
           if (isNaN(Number(text))) {
@@ -110,7 +176,7 @@ export class BotService {
           state.step = 'WAIT_COUNT';
           await this.redis.setUserState(tgId, state);
           await ctx.reply('Soni (dona):');
-          return;
+          break;
 
         case 'WAIT_COUNT':
           if (isNaN(Number(text))) {
@@ -120,13 +186,13 @@ export class BotService {
           state.data.count = Number(text);
           state.step = 'WAIT_PHOTOS';
           await this.redis.setUserState(tgId, state);
-          await ctx.reply("Endi rasm(lar)ni yuboring (Max: 2 ta).");
-          return;
+          await ctx.reply('Endi rasm(lar)ni yuboring (Max: 2 ta).');
+          break;
       }
       return;
     }
 
-    // 4. Qidiruv logikasi
+    // 6. Qidiruv logikasi (Agar hech qanday state bo'lmasa)
     await this.searchTires(ctx, text);
   }
 
@@ -216,7 +282,7 @@ export class BotService {
   }
 
   private async searchTires(ctx: Context, query: string) {
-    if (!ctx.chat) return;
+    if (!ctx.chat || !ctx.from) return;
 
     await ctx.reply(`🔍 "${query}" bo'yicha shinalar qidirilmoqda...`);
 
@@ -228,38 +294,110 @@ export class BotService {
         ],
       },
       include: { photos: true },
-      take: 5, // Bir qidiruvda maksimum 5ta qaytarish xavfsizroq
+      take: 5,
     });
 
     if (tires.length === 0) {
-      await ctx.reply("❌ Kechirasiz, ko'rsatilgan so'rov bo'yicha shina topilmadi.");
-      return;
+      return await ctx.reply(
+        "❌ Kechirasiz, ko'rsatilgan so'rov bo'yicha shina topilmadi.",
+      );
     }
 
+    // 1. Foydalanuvchi admin ekanligini tekshiramiz
+    const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
+
     for (const tire of tires) {
-      const captionText = `📦 <b>Shina ma'lumotlari</b>\n\n` +
+      const captionText =
+        `📦 <b>Shina ma'lumotlari</b>\n\n` +
         `🛞 <b>Nomi:</b> ${tire.name}\n` +
         `📏 <b>O'lchami:</b> ${tire.size}\n` +
         `💰 <b>Narxi:</b> ${tire.price.toLocaleString('uz-UZ')} so'm\n` +
         `📊 <b>Ombor qoldig'i:</b> ${tire.count} dona`;
 
+      // 2. Media group yuborish (Rasmlar bo'lsa)
       if (tire.photos && tire.photos.length > 0) {
         const mediaGroup = tire.photos.map((p) => ({
           type: 'photo',
           media: p.url,
         }));
-
         try {
-          // 1. Dastlab albomni (media group) yuboramiz
           await ctx.replyWithMediaGroup(mediaGroup as any);
         } catch (error) {
           console.error('Album yuborishda xato:', error);
         }
       }
 
-      // 2. Keyin matn va tugmachani yuboramiz (huddi rasmdagidek ajralgan holda keladi)
-      await ctx.replyWithHTML(captionText);
+      // 3. Admin uchun tugmalar yasaymiz
+      let extraMarkup: any = {};
+      // searchTires ichidagi tugmalar qismi
+      if (isAdmin) {
+        extraMarkup = Markup.inlineKeyboard([
+          [
+            Markup.button.callback('➖ Kamaytirish', `dec_tire_${tire.id}`),
+            Markup.button.callback('📝 Tahrirlash', `edit_tire_${tire.id}`),
+            Markup.button.callback("➕ Qo'shish", `inc_tire_${tire.id}`),
+          ],
+        ]);
+      }
+
+      // 4. Matn va tugmalarni yuboramiz
+      await ctx.replyWithHTML(captionText, extraMarkup);
     }
+  }
+
+  // 1. Qo'shish tugmasi bosilganda
+  @Action(/^inc_tire_(.+)$/)
+  async onIncrementStart(@Ctx() ctx: any) {
+    const tireId = ctx.match[1];
+    const tgId = BigInt(ctx.from.id);
+
+    await this.redis.setUserState(tgId, {
+      step: 'WAIT_INC_COUNT',
+      data: { tire_id: tireId, photos: [] },
+    });
+
+    // Avval callbackga javob beramiz (soat belgisi ketishi uchun)
+    await ctx.answerCbQuery();
+
+    // Keyin alohida xabar yuboramiz
+    await ctx.reply("Nechta shina qo'shmoqchisiz? (Raqam kiriting)");
+  }
+
+  @Action(/^dec_tire_(.+)$/)
+  async onDecrementStart(@Ctx() ctx: any) {
+    const tireId = ctx.match[1];
+    const tgId = BigInt(ctx.from.id);
+
+    await this.redis.setUserState(tgId, {
+      step: 'WAIT_DEC_COUNT',
+      data: { tire_id: tireId, photos: [] },
+    });
+
+    await ctx.answerCbQuery();
+    await ctx.reply('Nechta shina kamaytirmoqchisiz? (Raqam kiriting)');
+  }
+
+  // 3. onText ichida ishlov berish
+  // ... (oldingi javobdagi WAIT_INC_COUNT va WAIT_DEC_COUNT mantiqi bu yerda ishlaydi)
+  @Action(/edit_(name|size|price|count)/)
+  async onFieldSelect(@Ctx() ctx: any) {
+    const field = ctx.match[1]; // name, size, price yoki count
+    const tgId = BigInt(ctx.from.id);
+    const state = await this.redis.getUserState(tgId);
+
+    if (!state) return ctx.answerCbQuery("Eski ma'lumot topilmadi.");
+
+    state.step = `WAIT_EDIT_${field.toUpperCase()}`; // Masalan: WAIT_EDIT_NAME
+    await this.redis.setUserState(tgId, state);
+
+    const labels = {
+      name: 'nomini',
+      size: "o'lchamini",
+      price: 'narxini',
+      count: 'sonini',
+    };
+    await ctx.reply(`Yangi ${labels[field]} kiriting:`);
+    await ctx.answerCbQuery();
   }
 
   async getAdminByTgId(telegramId: bigint) {
@@ -298,5 +436,44 @@ export class BotService {
         throw new InternalServerErrorException('Serverda hatolik');
       }
     });
+  }
+
+  async pluseTireFromBot(limit: number, tire_id: string) {
+    try {
+      this.prisma.tire.update({
+        where: { id: tire_id },
+        data: { count: { increment: limit } },
+      });
+    } catch (error) {
+      console.log(error);
+      throw new InternalServerErrorException('Serverda hatolik');
+    }
+  }
+
+  async minuseTireFromBot(limit: number, tire_id: string) {
+    try {
+      this.prisma.tire.update({
+        where: { id: tire_id },
+        data: { count: { decrement: limit } },
+      });
+    } catch (error) {
+      console.log(error);
+      throw new InternalServerErrorException('Serverda hatolik');
+    }
+  }
+
+  async tireDataUpdateFromBot(
+    payload: Partial<{ name: string; size: string; price: number }>,
+    tire_id: string,
+  ) {
+    try {
+      const data = { ...payload };
+      if (payload.price) data.price = Number(payload.price);
+
+      this.prisma.tire.update({ where: { id: tire_id }, data });
+    } catch (error) {
+      console.log(error);
+      throw new InternalServerErrorException('Serverda hatolik');
+    }
   }
 }
