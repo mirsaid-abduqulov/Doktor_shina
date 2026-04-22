@@ -26,6 +26,6 @@ export class KeepAliveService implements OnApplicationBootstrap {
       } catch (e) {
         this.logger.error(`Keep-alive pingda xato (${url}): ${e.message}`);
       }
-    }, 1000 * 60 * 5); // Har 5 daqiqada
+    }, 1000 * 60 * 3); // Har 3 daqiqada
   }
 }
