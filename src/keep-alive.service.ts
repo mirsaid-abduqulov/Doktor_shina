@@ -10,7 +10,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
 
   onApplicationBootstrap() {
     const appUrl = this.configService.get<string>('APP_URL');
-    
+
     // Agar APP_URL bo'lmasa, ping ishlamasin (masalan, localhostda kerakmas)
     if (!appUrl) {
       this.logger.warn('APP_URL topilmadi, Keep-alive ping yoqilmadi.');
@@ -18,7 +18,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
     }
 
     const url = `${appUrl}/tires/health`;
-    
+
     this.logger.log(`Keep-alive xizmati ishga tushdi. URL: ${url}`);
 
     // Loyiha to'liq yurguncha kutib, keyin boshlaymiz
@@ -29,15 +29,18 @@ export class KeepAliveService implements OnApplicationBootstrap {
 
   private startPing(url: string) {
     // 13 daqiqa (780,000 ms) - Render limitiga mos va xavfsiz
-    const intervalTime = 1000 * 60 * 13; 
+    const intervalTime = 1000 * 60 * 1;
 
     setInterval(async () => {
       try {
         // timeout qo'shish shart, aks holda so'rov osilib qolsa resurs yeydi
-        await axios.get(url, { timeout: 5000 }); 
-        this.logger.log('Keep-alive ping muvaffaqiyatli.');
+        const response = await axios.get(url, {
+          timeout: 10000,
+          headers: { 'User-Agent': 'Render-Keep-Alive-Bot' },
+        });
+        this.logger.log(`Ping status: ${response.status} - ${url}`);
       } catch (e) {
-        this.logger.error(`Keep-alive xatosi: ${e.message}`);
+        this.logger.error(`Ping xatosi: ${e.response?.status || e.message}`);
       }
     }, intervalTime);
   }
