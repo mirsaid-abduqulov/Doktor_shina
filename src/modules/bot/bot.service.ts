@@ -210,7 +210,7 @@ export class BotService {
     }
 
     let messageText = `<b>${type} bo'limi</b> (Jami: ${total})\n\n`;
-    const productButtons = [];
+    const productButtons: any[] = [];
     
     for (let i = 0; i < products.length; i++) {
         const p = products[i];
