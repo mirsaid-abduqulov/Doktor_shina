@@ -52,23 +52,43 @@ export class ProductsService {
   }
 
   /**
-   * Barcha mahsulotlarni qidirish
+   * Barcha mahsulotlarni qidirish (Paginatsiya bilan)
    */
-  async findAll(query?: string, type?: ProductType) {
-    return this.prisma.product.findMany({
-      where: {
-        AND: [
-          type ? { type } : {},
-          query ? {
-            OR: [
-              { name: { contains: query, mode: 'insensitive' } },
-            ],
-          } : {},
-        ]
-      },
-      include: { photos: true },
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(query?: string, type?: ProductType, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
+    
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where: {
+          AND: [
+            type ? { type } : {},
+            query ? {
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+              ],
+            } : {},
+          ]
+        },
+        include: { photos: true },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.product.count({
+        where: {
+          AND: [
+            type ? { type } : {},
+            query ? {
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+              ],
+            } : {},
+          ]
+        }
+      })
+    ]);
+
+    return { products, total, totalPages: Math.ceil(total / limit) };
   }
 
   /**

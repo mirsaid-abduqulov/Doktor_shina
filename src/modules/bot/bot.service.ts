@@ -21,7 +21,7 @@ export class BotService {
     private readonly configService: ConfigService,
     private readonly mediaservice: MediaService,
     private readonly redis: RedisService,
-  ) {}
+  ) { }
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
@@ -38,8 +38,8 @@ export class BotService {
     }
 
     await ctx.reply(
-      "Xush kelibsiz! Mahsulot qidirish uchun mahsulot nomini yozib yuboring.",
-      Markup.removeKeyboard(),
+      "Xush kelibsiz! Mahsulotlarni ko'rish uchun quyidagilardan foydalaning.",
+      Markup.keyboard([["📦 Katalog"]]).resize(),
     );
   }
 
@@ -174,7 +174,99 @@ export class BotService {
       return;
     }
 
+    if (text === "📦 Katalog") {
+      await ctx.reply(
+        'Mahsulot turini tanlang:',
+        Markup.inlineKeyboard([
+          [Markup.button.callback('Shina', 'browse_SHINA_1'), Markup.button.callback('Akkumulyator', 'browse_AKKUMULYATOR_1')],
+          [Markup.button.callback('Disklar', 'browse_DISKLAR_1'), Markup.button.callback('Extiyot qism', 'browse_EXTIYOT_QISM_1')],
+          [Markup.button.callback('Kamera', 'browse_KAMERA_1')],
+        ]),
+      );
+      return;
+    }
+
     await this.searchProducts(ctx, text);
+  }
+
+  @Action(/^browse_(.+)_(\d+)$/)
+  async onBrowse(@Ctx() ctx: any) {
+    const type = ctx.match[1] as ProductType;
+    const page = parseInt(ctx.match[2]);
+
+    const { products, total, totalPages } = await this.prisma.product.findMany({
+      where: { type },
+      include: { photos: true },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * 10,
+      take: 10,
+    }).then(async (res) => {
+      const count = await this.prisma.product.count({ where: { type } });
+      return { products: res, total: count, totalPages: Math.ceil(count / 10) };
+    });
+
+    if (products.length === 0) {
+      return ctx.answerCbQuery('Bu bo\'limda mahsulotlar topilmadi.');
+    }
+
+    let messageText = `<b>${type} bo'limi</b> (Jami: ${total})\n\n`;
+    const inlineButtons: any[][] = [];
+
+    for (const p of products) {
+      messageText += `🔹 ${p.name} - ${p.price.toLocaleString()} $\n`;
+      inlineButtons.push([Markup.button.callback(`👁 ${p.name}`, `view_p_${p.id}`)]);
+    }
+
+    // Navigatsiya tugmalari
+    const navButtons: any[] = [];
+    if (page > 1) {
+      navButtons.push(Markup.button.callback('⬅️', `browse_${type}_${page - 1}`));
+    }
+    navButtons.push(Markup.button.callback(`${page} / ${totalPages}`, 'noop'));
+    if (page < totalPages) {
+      navButtons.push(Markup.button.callback('➡️', `browse_${type}_${page + 1}`));
+    }
+
+    if (navButtons.length > 0) {
+      inlineButtons.push(navButtons);
+    }
+
+    try {
+      await ctx.editMessageText(messageText, {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard(inlineButtons)
+      });
+    } catch (error) {
+      await ctx.replyWithHTML(messageText, Markup.inlineKeyboard(inlineButtons));
+    }
+    await ctx.answerCbQuery();
+  }
+
+  @Action(/^view_p_(.+)$/)
+  async onViewProduct(@Ctx() ctx: any) {
+    const pId = ctx.match[1];
+    const p = await this.prisma.product.findUnique({ where: { id: pId }, include: { photos: true } });
+    if (!p) return ctx.answerCbQuery('Topilmadi');
+
+    const caption = `<b>${p.name}</b>\nTur: ${p.type}\nNarx: ${p.price}\nSoni: ${p.count}`;
+    if (p.photos.length > 0) {
+      await ctx.replyWithMediaGroup(p.photos.map(ph => ({ type: 'photo', media: ph.url })) as any);
+    }
+
+    const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
+    let markup: any = {};
+    if (isAdmin) {
+      markup = Markup.inlineKeyboard([
+        [Markup.button.callback('-', `dec_p_${p.id}`), Markup.button.callback('Edit', `edit_p_${p.id}`), Markup.button.callback('+', `inc_p_${p.id}`)]
+      ]);
+    }
+    await ctx.replyWithHTML(caption, markup);
+    await ctx.answerCbQuery();
+  }
+
+  @Action('noop')
+  async onNoop(@Ctx() ctx: any) {
+    await ctx.answerCbQuery();
   }
 
   @Action(/^set_type_(.+)$/)
