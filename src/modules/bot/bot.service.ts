@@ -11,6 +11,7 @@ import { CreateProductDto } from '../products/dto/create-product.dto';
 import { MediaService } from '../media/media.service';
 import { RedisService } from '../redis/redis.service';
 import { ProductType } from '@prisma/client';
+import { ProductsService } from '../products/products.service';
 
 @Update()
 @Injectable()
@@ -21,7 +22,8 @@ export class BotService {
     private readonly configService: ConfigService,
     private readonly mediaservice: MediaService,
     private readonly redis: RedisService,
-  ) { }
+    private readonly productsService: ProductsService,
+  ) {}
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
@@ -32,14 +34,14 @@ export class BotService {
     if (isAdmin) {
       await ctx.reply(
         'Xush kelibsiz, Admin!',
-        Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize(),
+        Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
       );
       return;
     }
 
     await ctx.reply(
       "Xush kelibsiz! Mahsulotlarni ko'rish uchun quyidagilardan foydalaning.",
-      Markup.keyboard([["Katalog"]]).resize(),
+      Markup.keyboard([['Katalog']]).resize(),
     );
   }
 
@@ -67,10 +69,16 @@ export class BotService {
         await ctx.reply(
           'Mahsulot turini tanlang:',
           Markup.inlineKeyboard([
-            [Markup.button.callback('Shina', 'set_type_SHINA'), Markup.button.callback('Akkumulyator', 'set_type_AKKUMULYATOR')],
-            [Markup.button.callback('Disklar', 'set_type_DISKLAR'), Markup.button.callback('Extiyot qism', 'set_type_EXTIYOT_QISM')],
+            [
+              Markup.button.callback('Shina', 'set_type_SHINA'),
+              Markup.button.callback('Akkumulyator', 'set_type_AKKUMULYATOR'),
+            ],
+            [
+              Markup.button.callback('Disklar', 'set_type_DISKLAR'),
+              Markup.button.callback('Extiyot qism', 'set_type_EXTIYOT_QISM'),
+            ],
             [Markup.button.callback('Kamera', 'set_type_KAMERA')],
-            [Markup.button.callback('Bekor qilish', 'cancel_process')]
+            [Markup.button.callback('Bekor qilish', 'cancel_process')],
           ]),
         );
         return;
@@ -81,14 +89,17 @@ export class BotService {
       await this.redis.deleteUserState(tgId);
       const isAdmin = await this.getAdminByTgId(tgId);
       const replyMarkup = isAdmin
-        ? Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize()
-        : Markup.keyboard([["Katalog"]]).resize();
+        ? Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize()
+        : Markup.keyboard([['Katalog']]).resize();
 
       await ctx.reply('Jarayon bekor qilindi.', replyMarkup);
       return;
     }
 
-    if (state && (state.step === 'WAIT_INC_COUNT' || state.step === 'WAIT_DEC_COUNT')) {
+    if (
+      state &&
+      (state.step === 'WAIT_INC_COUNT' || state.step === 'WAIT_DEC_COUNT')
+    ) {
       const countChange = Number(text.trim());
       if (isNaN(countChange) || countChange <= 0) {
         await ctx.reply('Faqat musbat raqam kiriting:');
@@ -100,20 +111,31 @@ export class BotService {
 
       try {
         if (!isIncrement) {
-          const product = await this.prisma.product.findUnique({ where: { id: productId } });
+          const product = await this.prisma.product.findUnique({
+            where: { id: productId },
+          });
           if (product && product.count < countChange) {
-            await ctx.reply(`Omborda yetarli mahsulot yo'q (Hozir: ${product.count}).`);
+            await ctx.reply(
+              `Omborda yetarli mahsulot yo'q (Hozir: ${product.count}).`,
+            );
             return;
           }
         }
 
         await this.prisma.product.update({
           where: { id: productId },
-          data: { count: isIncrement ? { increment: countChange } : { decrement: countChange } },
+          data: {
+            count: isIncrement
+              ? { increment: countChange }
+              : { decrement: countChange },
+          },
         });
 
         await this.redis.deleteUserState(tgId);
-        await ctx.reply('Muvaffaqiyatli yangilandi.', Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize());
+        await ctx.reply(
+          'Muvaffaqiyatli yangilandi.',
+          Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
+        );
         return;
       } catch (error) {
         await ctx.reply('Xatolik yuz berdi.');
@@ -165,21 +187,38 @@ export class BotService {
           }
 
           try {
-            await this.prisma.product.update({ where: { id: pId }, data: { [field]: val } });
+            await this.prisma.product.update({
+              where: { id: pId },
+              data: { [field]: val },
+            });
             await this.redis.deleteUserState(tgId);
-            await ctx.reply('Yangilandi.', Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize());
-          } catch (e) { await ctx.reply('Xatolik.'); }
+            await ctx.reply(
+              'Yangilandi.',
+              Markup.keyboard([
+                ["Yangi mahsulot qo'shish"],
+                ['Katalog'],
+              ]).resize(),
+            );
+          } catch (e) {
+            await ctx.reply('Xatolik.');
+          }
           break;
       }
       return;
     }
 
-    if (text === "Katalog") {
+    if (text === 'Katalog') {
       await ctx.reply(
         'Mahsulot turini tanlang:',
         Markup.inlineKeyboard([
-          [Markup.button.callback('Shina', 'browse_SHINA_1'), Markup.button.callback('Akkumulyator', 'browse_AKKUMULYATOR_1')],
-          [Markup.button.callback('Disklar', 'browse_DISKLAR_1'), Markup.button.callback('Extiyot qism', 'browse_EXTIYOT_QISM_1')],
+          [
+            Markup.button.callback('Shina', 'browse_SHINA_1'),
+            Markup.button.callback('Akkumulyator', 'browse_AKKUMULYATOR_1'),
+          ],
+          [
+            Markup.button.callback('Disklar', 'browse_DISKLAR_1'),
+            Markup.button.callback('Extiyot qism', 'browse_EXTIYOT_QISM_1'),
+          ],
           [Markup.button.callback('Kamera', 'browse_KAMERA_1')],
         ]),
       );
@@ -194,45 +233,55 @@ export class BotService {
     const type = ctx.match[1] as ProductType;
     const page = parseInt(ctx.match[2]);
 
-    const { products, total, totalPages } = await this.prisma.product.findMany({
-      where: { type },
-      include: { photos: true },
-      orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * 10,
-      take: 10,
-    }).then(async (res) => {
-      const count = await this.prisma.product.count({ where: { type } });
-      return { products: res, total: count, totalPages: Math.ceil(count / 10) };
-    });
+    const { products, total, totalPages } = await this.prisma.product
+      .findMany({
+        where: { type },
+        include: { photos: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * 10,
+        take: 10,
+      })
+      .then(async (res) => {
+        const count = await this.prisma.product.count({ where: { type } });
+        return {
+          products: res,
+          total: count,
+          totalPages: Math.ceil(count / 10),
+        };
+      });
 
     if (products.length === 0) {
-      return ctx.answerCbQuery('Bu bo\'limda mahsulotlar topilmadi.');
+      return ctx.answerCbQuery("Bu bo'limda mahsulotlar topilmadi.");
     }
 
     let messageText = `<b>${type} bo'limi</b> (Jami: ${total})\n\n`;
     const productButtons: any[] = [];
-    
+
     for (let i = 0; i < products.length; i++) {
-        const p = products[i];
-        const num = (page - 1) * 10 + (i + 1);
-        messageText += `${num}. ${p.name} - ${p.price.toLocaleString()} $\n`;
-        productButtons.push(Markup.button.callback(`${num}`, `view_p_${p.id}`));
+      const p = products[i];
+      const num = (page - 1) * 10 + (i + 1);
+      messageText += `${num}. ${p.name} - ${p.price.toLocaleString()} $\n`;
+      productButtons.push(Markup.button.callback(`${num}`, `view_p_${p.id}`));
     }
 
     const inlineButtons: any[][] = [];
     // Mahsulot tugmalarini qatorlarga bo'lish (har qatorda 5 tadan)
     for (let i = 0; i < productButtons.length; i += 5) {
-        inlineButtons.push(productButtons.slice(i, i + 5));
+      inlineButtons.push(productButtons.slice(i, i + 5));
     }
 
     // Navigatsiya tugmalari
     const navButtons: any[] = [];
     if (page > 1) {
-      navButtons.push(Markup.button.callback('Oldingi', `browse_${type}_${page - 1}`));
+      navButtons.push(
+        Markup.button.callback('Oldingi', `browse_${type}_${page - 1}`),
+      );
     }
     navButtons.push(Markup.button.callback(`${page} / ${totalPages}`, 'noop'));
     if (page < totalPages) {
-      navButtons.push(Markup.button.callback('Keyingi', `browse_${type}_${page + 1}`));
+      navButtons.push(
+        Markup.button.callback('Keyingi', `browse_${type}_${page + 1}`),
+      );
     }
 
     if (navButtons.length > 0) {
@@ -242,10 +291,13 @@ export class BotService {
     try {
       await ctx.editMessageText(messageText, {
         parse_mode: 'HTML',
-        ...Markup.inlineKeyboard(inlineButtons)
+        ...Markup.inlineKeyboard(inlineButtons),
       });
     } catch (error) {
-      await ctx.replyWithHTML(messageText, Markup.inlineKeyboard(inlineButtons));
+      await ctx.replyWithHTML(
+        messageText,
+        Markup.inlineKeyboard(inlineButtons),
+      );
     }
     await ctx.answerCbQuery();
   }
@@ -253,23 +305,127 @@ export class BotService {
   @Action(/^view_p_(.+)$/)
   async onViewProduct(@Ctx() ctx: any) {
     const pId = ctx.match[1];
-    const p = await this.prisma.product.findUnique({ where: { id: pId }, include: { photos: true } });
+    const p = await this.prisma.product.findUnique({
+      where: { id: pId },
+      include: { photos: true },
+    });
     if (!p) return ctx.answerCbQuery('Topilmadi');
 
     const caption = `<b>${p.name}</b>\nTur: ${p.type}\nNarx: ${p.price}\nSoni: ${p.count}`;
     if (p.photos.length > 0) {
-      await ctx.replyWithMediaGroup(p.photos.map(ph => ({ type: 'photo', media: ph.url })) as any);
+      await ctx.replyWithMediaGroup(
+        p.photos.map((ph) => ({ type: 'photo', media: ph.url })) as any,
+      );
     }
 
     const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
     let markup: any = {};
     if (isAdmin) {
       markup = Markup.inlineKeyboard([
-        [Markup.button.callback('-', `dec_p_${p.id}`), Markup.button.callback('Edit', `edit_p_${p.id}`), Markup.button.callback('+', `inc_p_${p.id}`)]
+        [
+          Markup.button.callback('-', `dec_p_${p.id}`),
+          Markup.button.callback('Edit', `edit_p_${p.id}`),
+          Markup.button.callback('+', `inc_p_${p.id}`),
+        ],
+        [
+          Markup.button.callback('Rasm', `edit_photo_${p.id}`),
+          Markup.button.callback("O'chirish", `del_p_${p.id}`),
+        ],
       ]);
     }
     await ctx.replyWithHTML(caption, markup);
     await ctx.answerCbQuery();
+  }
+
+  @Action(/^del_p_(.+)$/)
+  async onDelete(@Ctx() ctx: any) {
+    const pId = ctx.match[1];
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      "Rostdan ham o'chirmoqchimisiz?",
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('Ha', `confirm_del_${pId}`),
+          Markup.button.callback("Yo'q", 'cancel_process'),
+        ],
+      ]),
+    );
+  }
+
+  @Action(/^confirm_del_(.+)$/)
+  async onConfirmDelete(@Ctx() ctx: any) {
+    const pId = ctx.match[1];
+    try {
+      await this.productsService.remove(pId);
+      await ctx.editMessageText("Mahsulot o'chirildi.");
+      await ctx.answerCbQuery();
+    } catch (e) {
+      await ctx.reply('Xatolik');
+    }
+  }
+
+  @Action(/^edit_photo_(.+)$/)
+  async onEditPhotoStart(@Ctx() ctx: any) {
+    const pId = ctx.match[1];
+    await this.redis.setUserState(BigInt(ctx.from.id), {
+      step: 'WAIT_EDIT_PHOTO',
+      data: { product_id: pId, photos: [] },
+    });
+    await ctx.answerCbQuery();
+    await ctx.reply('Yangi rasmlarni yuboring (Max: 2):');
+  }
+
+  @Action('finalize_photo_edit')
+  async onFinalizePhotoEdit(@Ctx() ctx: any) {
+    const tgId = BigInt(ctx.from.id);
+    const state = await this.redis.getUserState(tgId);
+    if (!state || state.data.photos.length === 0)
+      return ctx.answerCbQuery('Kamida 1 ta rasm!');
+
+    await ctx.editMessageText('Rasmlar yangilanmoqda...');
+    try {
+      if (!state.data.product_id)
+        return ctx.answerCbQuery('Xato: ID topilmadi');
+      await this.updateProductPhotos(state.data.product_id, state.data.photos);
+      await this.redis.deleteUserState(tgId);
+      await ctx.reply(
+        'Rasmlar yangilandi.',
+        Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
+      );
+      await ctx.answerCbQuery();
+    } catch (e) {
+      await ctx.reply('Xatolik');
+    }
+  }
+
+  async updateProductPhotos(pId: string, tgFileIds: string[]) {
+    // 1. Eskilarini o'chirish
+    const product = await this.prisma.product.findUnique({
+      where: { id: pId },
+      include: { photos: true },
+    });
+    if (product?.photos) {
+      for (const ph of product.photos) {
+        await this.productsService.deletePhoto(ph.publicId).catch(() => {});
+      }
+      // DB dan rasmlarni o'chirish
+      await this.prisma.photo.deleteMany({ where: { productId: pId } });
+    }
+
+    // 2. Yangilarini yuklash
+    const token = this.configService.get<string>('BOT_TOKEN') as string;
+    const newPhotos: any[] = [];
+    for (const id of tgFileIds) {
+      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(
+        id,
+        token,
+      );
+      newPhotos.push({ url: res.url, publicId: res.publicId });
+    }
+    await this.prisma.product.update({
+      where: { id: pId },
+      data: { photos: { create: newPhotos } },
+    });
   }
 
   @Action('noop')
@@ -288,7 +444,10 @@ export class BotService {
       state.step = 'WAIT_NAME';
       await this.redis.setUserState(tgId, state);
       await ctx.answerCbQuery();
-      await ctx.reply('Mahsulot nomini kiriting:', Markup.keyboard([['Bekor qilish']]).resize());
+      await ctx.reply(
+        'Mahsulot nomini kiriting:',
+        Markup.keyboard([['Bekor qilish']]).resize(),
+      );
     }
   }
 
@@ -297,7 +456,7 @@ export class BotService {
     const tgId = BigInt(ctx.from.id);
     await this.redis.deleteUserState(tgId);
     await ctx.answerCbQuery('Bekor qilindi');
-    await ctx.editMessageText('Jarayon to\'xtatildi.');
+    await ctx.editMessageText("Jarayon to'xtatildi.");
   }
 
   @On('photo')
@@ -305,7 +464,12 @@ export class BotService {
     const tgId = BigInt(ctx.from?.id || 0);
     const state = await this.redis.getUserState(tgId);
 
-    if (state && state.step === 'WAIT_PHOTOS' && 'message' in ctx.update && 'photo' in ctx.update.message) {
+    if (
+      state &&
+      (state.step === 'WAIT_PHOTOS' || state.step === 'WAIT_EDIT_PHOTO') &&
+      'message' in ctx.update &&
+      'photo' in ctx.update.message
+    ) {
       const photos = ctx.update.message.photo;
       if (!photos || photos.length === 0) return;
       const fileId = photos[photos.length - 1].file_id;
@@ -315,9 +479,17 @@ export class BotService {
       await this.redis.setUserState(tgId, state);
 
       const len = state.data.photos.length;
-      await ctx.reply(`${len}-rasm qabul qilindi.`, Markup.inlineKeyboard([
-        Markup.button.callback('Saqlash', 'finalize_product')
-      ]));
+      await ctx.reply(
+        `${len}-rasm qabul qilindi.`,
+        Markup.inlineKeyboard([
+          Markup.button.callback(
+            'Saqlash',
+            state.step === 'WAIT_EDIT_PHOTO'
+              ? 'finalize_photo_edit'
+              : 'finalize_product',
+          ),
+        ]),
+      );
     }
   }
 
@@ -327,14 +499,20 @@ export class BotService {
     const tgId = BigInt(ctx.from.id);
     const state = await this.redis.getUserState(tgId);
 
-    if (!state || state.data.photos.length === 0) return ctx.answerCbQuery('Rasm yuklang!');
+    if (!state || state.data.photos.length === 0)
+      return ctx.answerCbQuery('Rasm yuklang!');
 
     await ctx.editMessageText('Saqlanmoqda...');
     try {
       await this.createProductFromBot(state.data as any, state.data.photos);
       await this.redis.deleteUserState(tgId);
-      await ctx.reply('Muvaffaqiyatli qo\'shildi.', Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize());
-    } catch (e) { await ctx.reply('Xatolik.'); }
+      await ctx.reply(
+        "Muvaffaqiyatli qo'shildi.",
+        Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
+      );
+    } catch (e) {
+      await ctx.reply('Xatolik.');
+    }
   }
 
   private async searchProducts(ctx: Context, query: string) {
@@ -343,7 +521,7 @@ export class BotService {
     const products = await this.prisma.product.findMany({
       where: { name: { contains: query, mode: 'insensitive' } },
       include: { photos: true },
-      take: 5
+      take: 5,
     });
 
     if (products.length === 0) return ctx.reply('Topilmadi.');
@@ -351,12 +529,18 @@ export class BotService {
     for (const p of products) {
       const caption = `<b>${p.name}</b>\nTur: ${p.type}\nNarx: ${p.price}\nSoni: ${p.count}`;
       if (p.photos.length > 0) {
-        await ctx.replyWithMediaGroup(p.photos.map(ph => ({ type: 'photo', media: ph.url })) as any);
+        await ctx.replyWithMediaGroup(
+          p.photos.map((ph) => ({ type: 'photo', media: ph.url })) as any,
+        );
       }
       let markup: any = {};
       if (isAdmin) {
         markup = Markup.inlineKeyboard([
-          [Markup.button.callback('-', `dec_p_${p.id}`), Markup.button.callback('Edit', `edit_p_${p.id}`), Markup.button.callback('+', `inc_p_${p.id}`)]
+          [
+            Markup.button.callback('-', `dec_p_${p.id}`),
+            Markup.button.callback('Edit', `edit_p_${p.id}`),
+            Markup.button.callback('+', `inc_p_${p.id}`),
+          ],
         ]);
       }
       await ctx.replyWithHTML(caption, markup);
@@ -366,15 +550,21 @@ export class BotService {
   @Action(/^inc_p_(.+)$/)
   async onInc(@Ctx() ctx: any) {
     const pId = ctx.match[1];
-    await this.redis.setUserState(BigInt(ctx.from.id), { step: 'WAIT_INC_COUNT', data: { product_id: pId, photos: [] } });
+    await this.redis.setUserState(BigInt(ctx.from.id), {
+      step: 'WAIT_INC_COUNT',
+      data: { product_id: pId, photos: [] },
+    });
     await ctx.answerCbQuery();
-    await ctx.reply('Qancha qo\'shish kerak?');
+    await ctx.reply("Qancha qo'shish kerak?");
   }
 
   @Action(/^dec_p_(.+)$/)
   async onDec(@Ctx() ctx: any) {
     const pId = ctx.match[1];
-    await this.redis.setUserState(BigInt(ctx.from.id), { step: 'WAIT_DEC_COUNT', data: { product_id: pId, photos: [] } });
+    await this.redis.setUserState(BigInt(ctx.from.id), {
+      step: 'WAIT_DEC_COUNT',
+      data: { product_id: pId, photos: [] },
+    });
     await ctx.answerCbQuery();
     await ctx.reply('Qancha ayirish kerak?');
   }
@@ -382,11 +572,21 @@ export class BotService {
   @Action(/^edit_p_(.+)$/)
   async onEditStart(@Ctx() ctx: any) {
     const pId = ctx.match[1];
-    await this.redis.setUserState(BigInt(ctx.from.id), { step: 'SELECT_FIELD', data: { product_id: pId, photos: [] } });
+    await this.redis.setUserState(BigInt(ctx.from.id), {
+      step: 'SELECT_FIELD',
+      data: { product_id: pId, photos: [] },
+    });
     await ctx.answerCbQuery();
-    await ctx.reply('Nimani o\'zgartiramiz?', Markup.inlineKeyboard([
-      [Markup.button.callback('Nom', 'edit_name'), Markup.button.callback('Narx', 'edit_price'), Markup.button.callback('Son', 'edit_count')]
-    ]));
+    await ctx.reply(
+      "Nimani o'zgartiramiz?",
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('Nom', 'edit_name'),
+          Markup.button.callback('Narx', 'edit_price'),
+          Markup.button.callback('Son', 'edit_count'),
+        ],
+      ]),
+    );
   }
 
   @Action(/^edit_(name|price|count)$/)
@@ -404,14 +604,17 @@ export class BotService {
   }
 
   async createProductFromBot(payload: CreateProductDto, tgFileIds: string[]) {
-    const token = this.configService.get('BOT_TOKEN');
-    const photos: { url: string; publicId: string }[] = [];
+    const token = this.configService.get<string>('BOT_TOKEN') as string;
+    const photos: any[] = [];
     for (const id of tgFileIds) {
-      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(id, token);
+      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(
+        id,
+        token,
+      );
       photos.push({ url: res.url, publicId: res.publicId });
     }
     return this.prisma.product.create({
-      data: { ...payload, photos: { create: photos } }
+      data: { ...payload, photos: { create: photos } },
     });
   }
 }

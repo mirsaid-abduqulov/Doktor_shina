@@ -136,4 +136,8 @@ export class ProductsService {
 
     return this.cloudinary.uploadFromBuffer(buffer, 'products');
   }
+
+  async deletePhoto(publicId: string) {
+    return await this.cloudinary.deleteFile(publicId);
+  }
 }
