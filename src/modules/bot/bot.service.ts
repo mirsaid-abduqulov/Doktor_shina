@@ -32,7 +32,7 @@ export class BotService {
     if (isAdmin) {
       await ctx.reply(
         'Xush kelibsiz, Admin! 🛠',
-        Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize(),
+        Markup.keyboard([["Yangi shina qo'shish"]]).resize(),
       );
       return;
     }
@@ -59,7 +59,7 @@ export class BotService {
     const state = await this.redis.getUserState(tgId);
 
     // 2. Admin shina qo'shishni boshlashi
-    if (text === "➕ Yangi shina qo'shish") {
+    if (text === "Yangi shina qo'shish") {
       const isAdmin = await this.getAdminByTgId(tgId);
       if (isAdmin) {
         await this.redis.setUserState(tgId, {
@@ -68,19 +68,19 @@ export class BotService {
         });
         await ctx.reply(
           'Yangi shina nomini kiriting:',
-          Markup.keyboard([['❌ Bekor qilish']]).resize(),
+          Markup.keyboard([['Bekor qilish']]).resize(),
         );
         return; // Return faqat matn yuborilgandan keyin
       }
     }
 
     // 3. Bekor qilish logikasi
-    if (text === '❌ Bekor qilish' && state) {
+    if (text === 'Bekor qilish' && state) {
       await this.redis.deleteUserState(tgId);
       const isAdmin = await this.getAdminByTgId(tgId);
 
       const replyMarkup = isAdmin
-        ? Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize()
+        ? Markup.keyboard([["Yangi shina qo'shish"]]).resize()
         : Markup.removeKeyboard();
 
       await ctx.reply('Jarayon bekor qilindi.', replyMarkup);
@@ -98,7 +98,7 @@ export class BotService {
       if (isNaN(countChange) || countChange <= 0) {
         await ctx.reply(
           '⚠️ Xatolik: Iltimos, faqat musbat raqam kiriting!\n\nMisol: 5, 10, 20',
-          Markup.keyboard([['❌ Bekor qilish']]).resize(),
+          Markup.keyboard([['Bekor qilish']]).resize(),
         );
         return; // Bu yerda return qilish shart, pastga tushib ketmasligi uchun
       }
@@ -107,7 +107,7 @@ export class BotService {
       if (!tireId) {
         await this.redis.deleteUserState(tgId);
         await ctx.reply(
-          "❌ Shina ID topilmadi, iltimos qaytadan urinib ko'ring.",
+          "Shina ID topilmadi, iltimos qaytadan urinib ko'ring.",
         );
         return;
       }
@@ -121,8 +121,8 @@ export class BotService {
           });
           if (currentTire && currentTire.count < countChange) {
             await ctx.reply(
-              `❌ Xatolik!\nOmborda bor-yog'i ${currentTire.count} ta shina bor.\nSiz esa ${countChange} tani ayirmoqchisiz.`,
-              Markup.keyboard([['❌ Bekor qilish']]).resize(),
+              `Xatolik!\nOmborda bor-yog'i ${currentTire.count} ta shina bor.\nSiz esa ${countChange} tani ayirmoqchisiz.`,
+              Markup.keyboard([['Bekor qilish']]).resize(),
             );
             return;
           }
@@ -139,13 +139,13 @@ export class BotService {
 
         await this.redis.deleteUserState(tgId);
         await ctx.reply(
-          `✅ Muvaffaqiyatli bajarildi!\nShina soni ${countChange} taga ${isIncrement ? 'oshirildi' : 'kamaytirildi'}.`,
-          Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize(),
+          `Muvaffaqiyatli bajarildi!\nShina soni ${countChange} taga ${isIncrement ? 'oshirildi' : 'kamaytirildi'}.`,
+          Markup.keyboard([["Yangi shina qo'shish"]]).resize(),
         );
         return;
       } catch (error) {
         console.error('Update error:', error);
-        await ctx.reply('❌ Bazaga yozishda texnik xatolik yuz berdi.');
+        await ctx.reply('Bazaga yozishda texnik xatolik yuz berdi.');
         return;
       }
     }
@@ -187,6 +187,45 @@ export class BotService {
           state.step = 'WAIT_PHOTOS';
           await this.redis.setUserState(tgId, state);
           await ctx.reply('Endi rasm(lar)ni yuboring (Max: 2 ta).');
+          break;
+
+        // TAHRIRLASH QISMI
+        case 'WAIT_EDIT_NAME':
+        case 'WAIT_EDIT_SIZE':
+        case 'WAIT_EDIT_PRICE':
+        case 'WAIT_EDIT_COUNT':
+          const fieldMap = {
+            WAIT_EDIT_NAME: 'name',
+            WAIT_EDIT_SIZE: 'size',
+            WAIT_EDIT_PRICE: 'price',
+            WAIT_EDIT_COUNT: 'count',
+          };
+          const field = fieldMap[state.step];
+          const tireId = state.data.tire_id;
+          let newValue: string | number = text;
+
+          if (field === 'price' || field === 'count') {
+            newValue = Number(text);
+            if (isNaN(newValue)) {
+              await ctx.reply('Iltimos, faqat raqam kiriting!');
+              return;
+            }
+          }
+
+          try {
+            await this.prisma.tire.update({
+              where: { id: tireId },
+              data: { [field]: newValue },
+            });
+            await this.redis.deleteUserState(tgId);
+            await ctx.reply(
+              "Ma'lumotlar muvaffaqiyatli yangilandi!",
+              Markup.keyboard([["Yangi shina qo'shish"]]).resize(),
+            );
+          } catch (error) {
+            console.error('Edit error:', error);
+            await ctx.reply('Xatolik yuz berdi. Iltimos qaytadan urinib ko\'ring.');
+          }
           break;
       }
       return;
@@ -235,7 +274,7 @@ export class BotService {
         await ctx.reply(
           textMsg,
           Markup.inlineKeyboard([
-            Markup.button.callback('✅ Saqlash', 'finalize_tire'),
+            Markup.button.callback('Saqlash', 'finalize_tire'),
           ]),
         );
         return;
@@ -260,7 +299,7 @@ export class BotService {
       return;
     }
 
-    await ctx.editMessageText("⏳ Ma'lumotlar saqlanmoqda...");
+    await ctx.editMessageText("Ma'lumotlar saqlanmoqda...");
 
     try {
       await this.createTireFromBot(
@@ -270,13 +309,13 @@ export class BotService {
 
       await this.redis.deleteUserState(tgId);
       await ctx.reply(
-        "✅ Shina bazaga muvaffaqiyatli qo'shildi!",
-        Markup.keyboard([["➕ Yangi shina qo'shish"]]).resize(),
+        "Shina bazaga muvaffaqiyatli qo'shildi!",
+        Markup.keyboard([["Yangi shina qo'shish"]]).resize(),
       );
       await ctx.answerCbQuery();
     } catch (error) {
       console.error(error);
-      await ctx.reply('❌ Xatolik yuz berdi.');
+      await ctx.reply('Xatolik yuz berdi.');
       await ctx.answerCbQuery();
     }
   }
@@ -299,7 +338,7 @@ export class BotService {
 
     if (tires.length === 0) {
       return await ctx.reply(
-        "❌ Kechirasiz, ko'rsatilgan so'rov bo'yicha shina topilmadi.",
+        "Kechirasiz, ko'rsatilgan so'rov bo'yicha shina topilmadi.",
       );
     }
 
@@ -308,11 +347,11 @@ export class BotService {
 
     for (const tire of tires) {
       const captionText =
-        `📦 <b>Shina ma'lumotlari</b>\n\n` +
-        `🛞 <b>Nomi:</b> ${tire.name}\n` +
-        `📏 <b>O'lchami:</b> ${tire.size}\n` +
-        `💰 <b>Narxi:</b> ${tire.price.toLocaleString('uz-UZ')} $\n` +
-        `📊 <b>Ombor qoldig'i:</b> ${tire.count} dona`;
+        `<b>Shina ma'lumotlari</b>\n\n` +
+        `<b>Nomi:</b> ${tire.name}\n` +
+        `<b>O'lchami:</b> ${tire.size}\n` +
+        `<b>Narxi:</b> ${tire.price.toLocaleString('uz-UZ')} $\n` +
+        `<b>Ombor qoldig'i:</b> ${tire.count} dona`;
 
       // 2. Media group yuborish (Rasmlar bo'lsa)
       if (tire.photos && tire.photos.length > 0) {
@@ -333,9 +372,9 @@ export class BotService {
       if (isAdmin) {
         extraMarkup = Markup.inlineKeyboard([
           [
-            Markup.button.callback('➖ Kamaytirish', `dec_tire_${tire.id}`),
-            Markup.button.callback('📝 Tahrirlash', `edit_tire_${tire.id}`),
-            Markup.button.callback("➕ Qo'shish", `inc_tire_${tire.id}`),
+            Markup.button.callback('Kamaytirish', `dec_tire_${tire.id}`),
+            Markup.button.callback('Tahrirlash', `edit_tire_${tire.id}`),
+            Markup.button.callback("Qo'shish", `inc_tire_${tire.id}`),
           ],
         ]);
       }
@@ -379,13 +418,43 @@ export class BotService {
 
   // 3. onText ichida ishlov berish
   // ... (oldingi javobdagi WAIT_INC_COUNT va WAIT_DEC_COUNT mantiqi bu yerda ishlaydi)
-  @Action(/edit_(name|size|price|count)/)
+  // 1. Tahrirlash tugmasi bosilganda (qaysi maydonni tahrirlashni tanlash)
+  @Action(/^edit_tire_(.+)$/)
+  async onEditStart(@Ctx() ctx: any) {
+    const tireId = ctx.match[1];
+    const tgId = BigInt(ctx.from.id);
+
+    await this.redis.setUserState(tgId, {
+      step: 'SELECT_EDIT_FIELD',
+      data: { tire_id: tireId, photos: [] },
+    });
+
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      "Qaysi ma'lumotni o'zgartirmoqchisiz?",
+      Markup.inlineKeyboard([
+        [
+          Markup.button.callback('Nomi', 'edit_name'),
+          Markup.button.callback("O'lchami", 'edit_size'),
+        ],
+        [
+          Markup.button.callback('Narxi', 'edit_price'),
+          Markup.button.callback('Soni', 'edit_count'),
+        ],
+      ]),
+    );
+  }
+
+  // 2. Maydon tanlanganda
+  @Action(/^edit_(name|size|price|count)$/)
   async onFieldSelect(@Ctx() ctx: any) {
     const field = ctx.match[1]; // name, size, price yoki count
     const tgId = BigInt(ctx.from.id);
     const state = await this.redis.getUserState(tgId);
 
-    if (!state) return ctx.answerCbQuery("Eski ma'lumot topilmadi.");
+    if (!state || !state.data.tire_id) {
+      return ctx.answerCbQuery("Eski ma'lumot topilmadi.");
+    }
 
     state.step = `WAIT_EDIT_${field.toUpperCase()}`; // Masalan: WAIT_EDIT_NAME
     await this.redis.setUserState(tgId, state);
@@ -396,8 +465,9 @@ export class BotService {
       price: 'narxini',
       count: 'sonini',
     };
-    await ctx.reply(`Yangi ${labels[field]} kiriting:`);
+
     await ctx.answerCbQuery();
+    await ctx.reply(`Yangi ${labels[field]}ni kiriting:`, Markup.keyboard([['Bekor qilish']]).resize());
   }
 
   async getAdminByTgId(telegramId: bigint) {
@@ -440,7 +510,7 @@ export class BotService {
 
   async pluseTireFromBot(limit: number, tire_id: string) {
     try {
-      this.prisma.tire.update({
+      await this.prisma.tire.update({
         where: { id: tire_id },
         data: { count: { increment: limit } },
       });
@@ -452,7 +522,7 @@ export class BotService {
 
   async minuseTireFromBot(limit: number, tire_id: string) {
     try {
-      this.prisma.tire.update({
+      await this.prisma.tire.update({
         where: { id: tire_id },
         data: { count: { decrement: limit } },
       });
@@ -470,7 +540,7 @@ export class BotService {
       const data = { ...payload };
       if (payload.price) data.price = Number(payload.price);
 
-      this.prisma.tire.update({ where: { id: tire_id }, data });
+      await this.prisma.tire.update({ where: { id: tire_id }, data });
     } catch (error) {
       console.log(error);
       throw new InternalServerErrorException('Serverda hatolik');
