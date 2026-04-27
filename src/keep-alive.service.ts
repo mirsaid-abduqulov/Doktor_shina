@@ -29,7 +29,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
 
   private startPing(url: string) {
     // 13 daqiqa (780,000 ms) - Render limitiga mos va xavfsiz
-    const intervalTime = 1000 * 60 * 5;
+    const intervalTime = 1000 * 60 * 10;
 
     setInterval(async () => {
       try {
