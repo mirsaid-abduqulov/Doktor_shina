@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BotModule } from './modules/bot/bot.module';
 import { AdminsModule } from './modules/admins/admins.module';
-import { TiresModule } from './modules/tires/tires.module';
+import { ProductsModule } from './modules/products/products.module';
 import { ConfigModule } from '@nestjs/config';
 import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { MulterModule } from '@nestjs/platform-express';
@@ -23,7 +23,7 @@ import { KeepAliveService } from './keep-alive.service';
     RedisModule,
     BotModule,
     AdminsModule,
-    TiresModule,
+    ProductsModule,
     MediaModule,
   ],
   controllers: [],

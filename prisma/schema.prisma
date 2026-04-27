@@ -13,25 +13,32 @@ model Admin {
   createdAt DateTime @default(now())
 }
 
-model Tire {
-  id     String     @id @default(uuid())
-  name   String // Masalan: Lassa Multiways
-  size   String // Masalan: 205/55 R16
-  price  Float // Narxi
-  count  Int     @default(0) // Ombor qoldig'i
-  photos Photo[] // Rasmlar URL yoki FileID lari massivi
+enum ProductType {
+  SHINA
+  AKKUMULYATOR
+  DISKLAR
+  EXTIYOT_QISM
+  KAMERA
+}
 
-  // Tashqi kalitlar
+model Product {
+  id        String      @id @default(uuid())
+  name      String 
+  type      ProductType 
+  price     Float 
+  count     Int         @default(0) 
+  photos    Photo[] 
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([size]) // Qidiruvni tezlashtirish uchun o'lchamga indeks
+  @@index([type]) 
 }
 
 model Photo {
-  id       String    @id @default(uuid())
-  publicId String
-  url      String
-  tire     Tire   @relation(fields: [tireId], references: [id], onDelete: Cascade)
-  tireId   String
+  id        String    @id @default(uuid())
+  publicId  String
+  url       String
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
 }

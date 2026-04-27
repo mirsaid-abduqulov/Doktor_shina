@@ -1,11 +1,10 @@
-// products.service.ts
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
-import { ProductType } from '@prisma/client';
+import { CreateProductDto } from './dto/create-product.dto';
+import { PrismaService } from 'src/core/database/prisma.service';
+import { ProductType, Prisma } from '@prisma/client';
 import { Context } from 'telegraf';
 import axios from 'axios';
-import { PrismaService } from 'src/core/database/prisma.service';
-import { CreateProductDto } from '../products/dto/create-product.dto';
 
 @Injectable()
 export class ProductsService {
@@ -33,7 +32,7 @@ export class ProductsService {
    * Yangi mahsulot yaratish
    */
   async create(dto: CreateProductDto) {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       try {
         const product = await tx.product.create({
           data: {
@@ -88,7 +87,7 @@ export class ProductsService {
    * Mahsulotni o'chirish
    */
   async remove(id: string) {
-    return await this.prisma.$transaction(async (tx) => {
+    return await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const product = await tx.product.findUnique({
         where: { id },
         include: { photos: true },

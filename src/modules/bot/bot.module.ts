@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { BotService } from './bot.service';
-import { PrismaModule } from 'src/core/database/prsima.module';
+import { PrismaModule } from 'src/core/database/prisma.module';
 import { MediaModule } from '../media/media.module';
 import { TelegrafModule } from 'nestjs-telegraf';
 import { ConfigModule, ConfigService } from '@nestjs/config';

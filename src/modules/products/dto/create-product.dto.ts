@@ -1,15 +1,16 @@
 // create-tire.dto.ts
 import { Type } from 'class-transformer';
-import { IsString, IsNumber, Min, IsNotEmpty } from 'class-validator';
+import { IsString, IsNumber, Min, IsNotEmpty, IsEnum } from 'class-validator';
+import { ProductType } from '@prisma/client';
 
-export class CreateTireDto {
+export class CreateProductDto {
   @IsString()
   @IsNotEmpty()
-  name: string; // Masalan: Lassa Multiways
+  name: string;
 
-  @IsString()
+  @IsEnum(ProductType)
   @IsNotEmpty()
-  size: string; // Masalan: 205/55 R16
+  type: ProductType;
 
   @IsNumber({ maxDecimalPlaces: 2 }) // Verguldan keyin 2 ta raqamgacha ruxsat
   @Min(0)

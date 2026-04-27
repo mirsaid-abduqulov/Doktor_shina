@@ -2,10 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 
-export interface BotTireData {
-  tire_id?: string;
+import { ProductType } from '@prisma/client';
+
+export interface BotProductData {
+  product_id?: string;
   name?: string;
-  size?: string;
+  type?: ProductType;
   price?: number;
   count?: number;
   photos: string[];
@@ -13,7 +15,7 @@ export interface BotTireData {
 
 export interface UserState {
   step: string;
-  data: BotTireData;
+  data: BotProductData;
 }
 
 @Injectable()

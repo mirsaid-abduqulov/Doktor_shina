@@ -17,7 +17,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
       return;
     }
 
-    const url = `${appUrl}/tires/health`;
+    const url = `${appUrl}/products/health`;
 
     this.logger.log(`Keep-alive xizmati ishga tushdi. URL: ${url}`);
 
