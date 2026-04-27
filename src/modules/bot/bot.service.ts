@@ -39,7 +39,7 @@ export class BotService {
 
     await ctx.reply(
       "Xush kelibsiz! Mahsulotlarni ko'rish uchun quyidagilardan foydalaning.",
-      Markup.keyboard([["📦 Katalog"]]).resize(),
+      Markup.keyboard([["Katalog"]]).resize(),
     );
   }
 
@@ -174,7 +174,7 @@ export class BotService {
       return;
     }
 
-    if (text === "📦 Katalog") {
+    if (text === "Katalog") {
       await ctx.reply(
         'Mahsulot turini tanlang:',
         Markup.inlineKeyboard([
@@ -210,21 +210,29 @@ export class BotService {
     }
 
     let messageText = `<b>${type} bo'limi</b> (Jami: ${total})\n\n`;
-    const inlineButtons: any[][] = [];
+    const productButtons = [];
+    
+    for (let i = 0; i < products.length; i++) {
+        const p = products[i];
+        const num = (page - 1) * 10 + (i + 1);
+        messageText += `${num}. ${p.name} - ${p.price.toLocaleString()} $\n`;
+        productButtons.push(Markup.button.callback(`${num}`, `view_p_${p.id}`));
+    }
 
-    for (const p of products) {
-      messageText += `🔹 ${p.name} - ${p.price.toLocaleString()} $\n`;
-      inlineButtons.push([Markup.button.callback(`👁 ${p.name}`, `view_p_${p.id}`)]);
+    const inlineButtons: any[][] = [];
+    // Mahsulot tugmalarini qatorlarga bo'lish (har qatorda 5 tadan)
+    for (let i = 0; i < productButtons.length; i += 5) {
+        inlineButtons.push(productButtons.slice(i, i + 5));
     }
 
     // Navigatsiya tugmalari
     const navButtons: any[] = [];
     if (page > 1) {
-      navButtons.push(Markup.button.callback('⬅️', `browse_${type}_${page - 1}`));
+      navButtons.push(Markup.button.callback('Oldingi', `browse_${type}_${page - 1}`));
     }
     navButtons.push(Markup.button.callback(`${page} / ${totalPages}`, 'noop'));
     if (page < totalPages) {
-      navButtons.push(Markup.button.callback('➡️', `browse_${type}_${page + 1}`));
+      navButtons.push(Markup.button.callback('Keyingi', `browse_${type}_${page + 1}`));
     }
 
     if (navButtons.length > 0) {
