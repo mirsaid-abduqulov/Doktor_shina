@@ -311,7 +311,7 @@ export class BotService {
         `📦 <b>Shina ma'lumotlari</b>\n\n` +
         `🛞 <b>Nomi:</b> ${tire.name}\n` +
         `📏 <b>O'lchami:</b> ${tire.size}\n` +
-        `💰 <b>Narxi:</b> ${tire.price.toLocaleString('uz-UZ')} so'm\n` +
+        `💰 <b>Narxi:</b> ${tire.price.toLocaleString('uz-UZ')} $\n` +
         `📊 <b>Ombor qoldig'i:</b> ${tire.count} dona`;
 
       // 2. Media group yuborish (Rasmlar bo'lsa)
