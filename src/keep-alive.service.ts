@@ -40,6 +40,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
         });
         this.logger.log(`Ping status: ${response.status} - ${url}`);
       } catch (e) {
+        console.log(e)
         this.logger.error(`Ping xatosi: ${e.response?.status || e.message}`);
       }
     }, intervalTime);
