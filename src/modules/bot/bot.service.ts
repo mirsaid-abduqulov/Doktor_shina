@@ -328,7 +328,6 @@ export class BotService {
           Markup.button.callback('+', `inc_p_${p.id}`),
         ],
         [
-          Markup.button.callback('Rasm', `edit_photo_${p.id}`),
           Markup.button.callback("O'chirish", `del_p_${p.id}`),
         ],
       ]);
@@ -336,7 +335,7 @@ export class BotService {
     await ctx.replyWithHTML(caption, markup);
     await ctx.answerCbQuery();
   }
-
+  
   @Action(/^del_p_(.+)$/)
   async onDelete(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -351,7 +350,7 @@ export class BotService {
       ]),
     );
   }
-
+  
   @Action(/^confirm_del_(.+)$/)
   async onConfirmDelete(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -363,7 +362,7 @@ export class BotService {
       await ctx.reply('Xatolik');
     }
   }
-
+  
   @Action(/^edit_photo_(.+)$/)
   async onEditPhotoStart(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -381,7 +380,7 @@ export class BotService {
     const state = await this.redis.getUserState(tgId);
     if (!state || state.data.photos.length === 0)
       return ctx.answerCbQuery('Kamida 1 ta rasm!');
-
+    
     await ctx.editMessageText('Rasmlar yangilanmoqda...');
     try {
       if (!state.data.product_id)
@@ -407,11 +406,11 @@ export class BotService {
     if (product?.photos) {
       for (const ph of product.photos) {
         await this.productsService.deletePhoto(ph.publicId).catch(() => {});
-      }
+        }
       // DB dan rasmlarni o'chirish
       await this.prisma.photo.deleteMany({ where: { productId: pId } });
     }
-
+    
     // 2. Yangilarini yuklash
     const token = this.configService.get<string>('BOT_TOKEN') as string;
     const newPhotos: any[] = [];
@@ -427,18 +426,18 @@ export class BotService {
       data: { photos: { create: newPhotos } },
     });
   }
-
+  
   @Action('noop')
   async onNoop(@Ctx() ctx: any) {
     await ctx.answerCbQuery();
   }
-
+  
   @Action(/^set_type_(.+)$/)
   async onSetType(@Ctx() ctx: any) {
     const type = ctx.match[1] as ProductType;
     const tgId = BigInt(ctx.from.id);
     const state = await this.redis.getUserState(tgId);
-
+    
     if (state && state.step === 'WAIT_TYPE') {
       state.data.type = type;
       state.step = 'WAIT_NAME';
@@ -450,7 +449,7 @@ export class BotService {
       );
     }
   }
-
+  
   @Action('cancel_process')
   async onCancel(@Ctx() ctx: any) {
     const tgId = BigInt(ctx.from.id);
@@ -458,7 +457,7 @@ export class BotService {
     await ctx.answerCbQuery('Bekor qilindi');
     await ctx.editMessageText("Jarayon to'xtatildi.");
   }
-
+  
   @On('photo')
   async onPhoto(@Ctx() ctx: Context) {
     const tgId = BigInt(ctx.from?.id || 0);
@@ -474,10 +473,10 @@ export class BotService {
       if (!photos || photos.length === 0) return;
       const fileId = photos[photos.length - 1].file_id;
       if (state.data.photos.length >= 2) return ctx.reply('Max: 2 ta rasm!');
-
+      
       state.data.photos.push(fileId);
       await this.redis.setUserState(tgId, state);
-
+      
       const len = state.data.photos.length;
       await ctx.reply(
         `${len}-rasm qabul qilindi.`,
@@ -485,8 +484,8 @@ export class BotService {
           Markup.button.callback(
             'Saqlash',
             state.step === 'WAIT_EDIT_PHOTO'
-              ? 'finalize_photo_edit'
-              : 'finalize_product',
+            ? 'finalize_photo_edit'
+            : 'finalize_product',
           ),
         ]),
       );
@@ -498,7 +497,7 @@ export class BotService {
     if (!ctx.from) return;
     const tgId = BigInt(ctx.from.id);
     const state = await this.redis.getUserState(tgId);
-
+    
     if (!state || state.data.photos.length === 0)
       return ctx.answerCbQuery('Rasm yuklang!');
 
@@ -514,7 +513,7 @@ export class BotService {
       await ctx.reply('Xatolik.');
     }
   }
-
+  
   private async searchProducts(ctx: Context, query: string) {
     if (!ctx.from) return;
     const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
@@ -525,7 +524,7 @@ export class BotService {
     });
 
     if (products.length === 0) return ctx.reply('Topilmadi.');
-
+    
     for (const p of products) {
       const caption = `<b>${p.name}</b>\nTur: ${p.type}\nNarx: ${p.price}\nSoni: ${p.count}`;
       if (p.photos.length > 0) {
@@ -557,7 +556,7 @@ export class BotService {
     await ctx.answerCbQuery();
     await ctx.reply("Qancha qo'shish kerak?");
   }
-
+  
   @Action(/^dec_p_(.+)$/)
   async onDec(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -568,7 +567,7 @@ export class BotService {
     await ctx.answerCbQuery();
     await ctx.reply('Qancha ayirish kerak?');
   }
-
+  
   @Action(/^edit_p_(.+)$/)
   async onEditStart(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -584,6 +583,7 @@ export class BotService {
           Markup.button.callback('Nom', 'edit_name'),
           Markup.button.callback('Narx', 'edit_price'),
           Markup.button.callback('Son', 'edit_count'),
+          Markup.button.callback('Rasm', `edit_photo_${pId}`),
         ],
       ]),
     );
