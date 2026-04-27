@@ -32,7 +32,7 @@ export class BotService {
     if (isAdmin) {
       await ctx.reply(
         'Xush kelibsiz, Admin!',
-        Markup.keyboard([["Yangi mahsulot qo'shish"]]).resize(),
+        Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize(),
       );
       return;
     }
@@ -81,8 +81,8 @@ export class BotService {
       await this.redis.deleteUserState(tgId);
       const isAdmin = await this.getAdminByTgId(tgId);
       const replyMarkup = isAdmin
-        ? Markup.keyboard([["Yangi mahsulot qo'shish"]]).resize()
-        : Markup.removeKeyboard();
+        ? Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize()
+        : Markup.keyboard([["Katalog"]]).resize();
 
       await ctx.reply('Jarayon bekor qilindi.', replyMarkup);
       return;
@@ -113,7 +113,7 @@ export class BotService {
         });
 
         await this.redis.deleteUserState(tgId);
-        await ctx.reply('Muvaffaqiyatli yangilandi.', Markup.keyboard([["Yangi mahsulot qo'shish"]]).resize());
+        await ctx.reply('Muvaffaqiyatli yangilandi.', Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize());
         return;
       } catch (error) {
         await ctx.reply('Xatolik yuz berdi.');
@@ -167,7 +167,7 @@ export class BotService {
           try {
             await this.prisma.product.update({ where: { id: pId }, data: { [field]: val } });
             await this.redis.deleteUserState(tgId);
-            await ctx.reply('Yangilandi.', Markup.keyboard([["Yangi mahsulot qo'shish"]]).resize());
+            await ctx.reply('Yangilandi.', Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize());
           } catch (e) { await ctx.reply('Xatolik.'); }
           break;
       }
@@ -333,7 +333,7 @@ export class BotService {
     try {
       await this.createProductFromBot(state.data as any, state.data.photos);
       await this.redis.deleteUserState(tgId);
-      await ctx.reply('Muvaffaqiyatli qo\'shildi.', Markup.keyboard([["Yangi mahsulot qo'shish"]]).resize());
+      await ctx.reply('Muvaffaqiyatli qo\'shildi.', Markup.keyboard([["Yangi mahsulot qo'shish"], ["Katalog"]]).resize());
     } catch (e) { await ctx.reply('Xatolik.'); }
   }
 
