@@ -29,7 +29,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
 
   private startPing(url: string) {
     // 13 daqiqa (780,000 ms) - Render limitiga mos va xavfsiz
-    const intervalTime = 1000 * 60 * 10;
+    const intervalTime = 1000 * 60;
 
     setInterval(async () => {
       try {
@@ -40,7 +40,7 @@ export class KeepAliveService implements OnApplicationBootstrap {
         });
         this.logger.log(`Ping status: ${response.status} - ${url}`);
       } catch (e) {
-        console.log(e)
+        console.log(e);
         this.logger.error(`Ping xatosi: ${e.response?.status || e.message}`);
       }
     }, intervalTime);

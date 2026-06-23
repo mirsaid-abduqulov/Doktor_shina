@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { UpdateProductDto } from './dto/update-product.dto';
 import { PrismaService } from 'src/core/database/prisma.service';
-import { ProductType, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { Context } from 'telegraf';
 import axios from 'axios';
+import { normalizeName } from '../admins/admins.service';
 
 @Injectable()
 export class ProductsService {
@@ -33,59 +35,59 @@ export class ProductsService {
    */
   async create(dto: CreateProductDto) {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      try {
-        const product = await tx.product.create({
-          data: {
-            name: dto.name,
-            type: dto.type,
-            price: Number(dto.price),
-            count: Number(dto.count),
-          },
-          select: { id: true },
-        });
+      const product = await tx.product.create({
+        data: {
+          name: normalizeName(dto.name),
+          categoryId: dto.categoryId,
+          createdById: dto.createdById,
+          price: new Prisma.Decimal(dto.price),
+          stockQty: dto.stockQty,
+          unit: dto.unit || 'dona',
+        },
+        select: { id: true },
+      });
 
-        return { success: true, product_id: product.id };
-      } catch (e) {
-        console.log(e);
-      }
+      return { success: true, product_id: product.id };
     });
   }
 
   /**
    * Barcha mahsulotlarni qidirish (Paginatsiya bilan)
    */
-  async findAll(query?: string, type?: ProductType, page: number = 1, limit: number = 10) {
+  async findAll(query?: string, categoryId?: string, page: number = 1, limit: number = 10) {
     const skip = (page - 1) * limit;
     
+    const where: Prisma.ProductWhereInput = {
+      AND: [
+        categoryId ? { categoryId } : {},
+        query ? {
+          OR: [
+            { name: { contains: query, mode: 'insensitive' } },
+          ],
+        } : {},
+        { isActive: true }
+      ]
+    };
+
     const [products, total] = await Promise.all([
       this.prisma.product.findMany({
-        where: {
-          AND: [
-            type ? { type } : {},
-            query ? {
-              OR: [
-                { name: { contains: query, mode: 'insensitive' } },
-              ],
-            } : {},
-          ]
+        where,
+        include: { 
+          photos: true,
+          category: true,
+          createdBy: {
+            select: {
+              id: true,
+              fullName: true,
+              role: true
+            }
+          }
         },
-        include: { photos: true },
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
-      this.prisma.product.count({
-        where: {
-          AND: [
-            type ? { type } : {},
-            query ? {
-              OR: [
-                { name: { contains: query, mode: 'insensitive' } },
-              ],
-            } : {},
-          ]
-        }
-      })
+      this.prisma.product.count({ where })
     ]);
 
     return { products, total, totalPages: Math.ceil(total / limit) };
@@ -97,14 +99,36 @@ export class ProductsService {
   async findOne(id: string) {
     const product = await this.prisma.product.findUnique({
       where: { id },
-      include: { photos: true },
+      include: { 
+        photos: true,
+        category: true,
+        createdBy: true
+      },
     });
     if (!product) throw new NotFoundException('Mahsulot topilmadi');
     return product;
   }
 
   /**
-   * Mahsulotni o'chirish
+   * Mahsulotni yangilash
+   */
+  async update(id: string, dto: UpdateProductDto) {
+    const product = await this.findOne(id);
+    
+    const data: Prisma.ProductUpdateInput = {
+      ...dto,
+      name: dto.name ? normalizeName(dto.name) : product.name,  
+      price: dto.price ? new Prisma.Decimal(dto.price) : undefined,
+    };
+
+    return this.prisma.product.update({
+      where: { id },
+      data,
+    });
+  }
+
+  /**
+   * Mahsulotni o'chirish (yoki isActive=false qilish)
    */
   async remove(id: string) {
     return await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -117,6 +141,7 @@ export class ProductsService {
         throw new NotFoundException('Mahsulot topilmadi');
       }
 
+      // Rasmlarni Cloudinary-dan o'chirish
       if (product.photos && product.photos.length > 0) {
         for (const photo of product.photos) {
           await this.cloudinary.deleteFile(photo.publicId);
@@ -137,7 +162,22 @@ export class ProductsService {
     return this.cloudinary.uploadFromBuffer(buffer, 'products');
   }
 
+  async addPhotoToProduct(productId: string, url: string, publicId: string) {
+    return this.prisma.photo.create({
+      data: {
+        url,
+        publicId,
+        productId,
+      }
+    });
+  }
+
   async deletePhoto(publicId: string) {
+    // DB-dan o'chirish
+    await this.prisma.photo.deleteMany({
+      where: { publicId }
+    });
+    // Cloudinary-dan o'chirish
     return await this.cloudinary.deleteFile(publicId);
   }
 }

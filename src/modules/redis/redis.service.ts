@@ -2,14 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 
-import { ProductType } from '@prisma/client';
-
 export interface BotProductData {
   product_id?: string;
+  categoryId?: string; // Old: type
   name?: string;
-  type?: ProductType;
   price?: number;
-  count?: number;
+  stockQty?: number; // Old: count
+  unit?: string;
   photos: string[];
 }
 
@@ -25,7 +24,7 @@ export class RedisService {
   // Ma'lumotni saqlash (1 kun TTL bilan)
   async setUserState(telegramId: bigint, state: UserState) {
     const key = `tire_state:${telegramId}`;
-    await this.redis.set(key, JSON.stringify(state), 'EX', 86400); // 86400 sek = 24 soat || 7 kunga saqlash
+    await this.redis.set(key, JSON.stringify(state), 'EX', 86400); // 86400 sek = 24 soat
   }
 
   // Ma'lumotni o'qish
@@ -35,7 +34,7 @@ export class RedisService {
     return data ? (JSON.parse(data) as UserState) : null;
   }
 
-  // Ma'lumotni o'chirish (Ariza bitganda)
+  // Ma'lumotni o'chirish
   async deleteUserState(telegramId: bigint) {
     await this.redis.del(`tire_state:${telegramId}`);
   }

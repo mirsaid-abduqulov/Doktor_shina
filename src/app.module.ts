@@ -7,6 +7,7 @@ import { CloudinaryModule } from './modules/cloudinary/cloudinary.module';
 import { MulterModule } from '@nestjs/platform-express';
 import { MediaModule } from './modules/media/media.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { CategoriesModule } from './modules/categories/categories.module';
 import { KeepAliveService } from './keep-alive.service';
 
 @Module({
@@ -23,6 +24,7 @@ import { KeepAliveService } from './keep-alive.service';
     RedisModule,
     BotModule,
     AdminsModule,
+    CategoriesModule,
     ProductsModule,
     MediaModule,
   ],

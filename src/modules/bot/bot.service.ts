@@ -1,17 +1,16 @@
-import {
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Action, Ctx, InjectBot, On, Start, Update } from 'nestjs-telegraf';
 import { PrismaService } from 'src/core/database/prisma.service';
 import { Context, Markup, Telegraf } from 'telegraf';
 import { CreateProductDto } from '../products/dto/create-product.dto';
 import { MediaService } from '../media/media.service';
-import { RedisService } from '../redis/redis.service';
-import { ProductType } from '@prisma/client';
+import { RedisService, UserState } from '../redis/redis.service';
 import { ProductsService } from '../products/products.service';
+import { Prisma } from '@prisma/client';
+import { normalize } from 'path';
+import { normalizeName } from '../admins/admins.service';
+import { Role } from '../admins/dto/create-admin.dto';
 
 @Update()
 @Injectable()
@@ -23,18 +22,18 @@ export class BotService {
     private readonly mediaservice: MediaService,
     private readonly redis: RedisService,
     private readonly productsService: ProductsService,
-  ) {}
+  ) { }
 
   @Start()
   async onStart(@Ctx() ctx: Context) {
     if (!ctx.from) return;
 
-    const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
+    const user = await this.getAdminByTgId(BigInt(ctx.from.id));
 
-    if (isAdmin) {
+    if (user) {
       await ctx.reply(
-        'Xush kelibsiz, Admin!',
-        Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
+        `Xush kelibsiz, ${user.fullName}! (${user.role.toUpperCase()})`,
+        this.getMainKeyboard(user.role),
       );
       return;
     }
@@ -58,52 +57,88 @@ export class BotService {
     const tgId = BigInt(ctx.from.id);
     const text = ctx.update.message.text;
     const state = await this.redis.getUserState(tgId);
+    const user = await this.getAdminByTgId(tgId);
+    const role = user?.role;
 
+    // 1. Bekor qilish (Har doim birinchi)
+    if (text === 'Bekor qilish' && state) {
+      await this.redis.deleteUserState(tgId);
+      await ctx.reply('Jarayon bekor qilindi.', this.getMainKeyboard(role));
+      return;
+    }
+
+    // 2. Yangi mahsulot qo'shish boshlanishi
     if (text === "Yangi mahsulot qo'shish") {
-      const isAdmin = await this.getAdminByTgId(tgId);
-      if (isAdmin) {
+      if (role === 'super_admin' || role === 'admin' || role === 'staff') {
+        const categories = await this.prisma.category.findMany({
+          where: { parentId: null },
+        });
+
         await this.redis.setUserState(tgId, {
-          step: 'WAIT_TYPE',
+          step: 'WAIT_CATEGORY',
           data: { photos: [] },
         });
+
+        const buttons = categories.map((c) => [
+          Markup.button.callback(c.name, `set_cat_${c.id}`),
+        ]);
+        buttons.push([Markup.button.callback('Bekor qilish', 'cancel_process')]);
+
         await ctx.reply(
-          'Mahsulot turini tanlang:',
+          'Mahsulot kategoriyasini tanlang:',
+          Markup.inlineKeyboard(buttons),
+        );
+        return;
+      }
+    }
+
+    // 3. Xodimlarni boshqarish
+    if (text === 'Xodimlarni boshqarish') {
+      if (role === 'super_admin' || role === 'admin') {
+        await ctx.reply(
+          'Xodimlarni boshqarish bo\'limi:',
           Markup.inlineKeyboard([
-            [
-              Markup.button.callback('Shina', 'set_type_SHINA'),
-              Markup.button.callback('Akkumulyator', 'set_type_AKKUMULYATOR'),
-            ],
-            [
-              Markup.button.callback('Disklar', 'set_type_DISKLAR'),
-              Markup.button.callback('Extiyot qism', 'set_type_EXTIYOT_QISM'),
-            ],
-            [Markup.button.callback('Kamera', 'set_type_KAMERA')],
-            [Markup.button.callback('Bekor qilish', 'cancel_process')],
+            [Markup.button.callback('👥 Xodimlar ro\'yxati', 'list_staff')],
+            [Markup.button.callback('➕ Yangi xodim qo\'shish', 'add_staff_start')],
           ]),
         );
         return;
       }
     }
 
-    if (text === 'Bekor qilish' && state) {
-      await this.redis.deleteUserState(tgId);
-      const isAdmin = await this.getAdminByTgId(tgId);
-      const replyMarkup = isAdmin
-        ? Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize()
-        : Markup.keyboard([['Katalog']]).resize();
+    // 4. Katalog
+    if (text === 'Katalog') {
+      const categories = await this.prisma.category.findMany({
+        where: { parentId: null },
+      });
 
-      await ctx.reply('Jarayon bekor qilindi.', replyMarkup);
+      if (categories.length === 0) {
+        return ctx.reply("Hali kategoriyalar yo'q.");
+      }
+
+      const buttons = categories.map((c) => [
+        Markup.button.callback(c.name, `browse_cat_${c.id}_1`),
+      ]);
+
+      if (role === 'super_admin' || role === 'admin') {
+        buttons.push([Markup.button.callback("➕ Yangi kategoriya qo'shish", 'add_cat_root')]);
+      }
+
+      await ctx.reply(
+        'Kategoriyani tanlang:',
+        Markup.inlineKeyboard(buttons),
+      );
       return;
     }
 
+    // 5. Ombordagi sonni o'zgartirish
     if (
       state &&
       (state.step === 'WAIT_INC_COUNT' || state.step === 'WAIT_DEC_COUNT')
     ) {
       const countChange = Number(text.trim());
       if (isNaN(countChange) || countChange <= 0) {
-        await ctx.reply('Faqat musbat raqam kiriting:');
-        return;
+        return ctx.reply('Faqat musbat raqam kiriting:');
       }
 
       const productId = state.data.product_id;
@@ -114,37 +149,35 @@ export class BotService {
           const product = await this.prisma.product.findUnique({
             where: { id: productId },
           });
-          if (product && product.count < countChange) {
-            await ctx.reply(
-              `Omborda yetarli mahsulot yo'q (Hozir: ${product.count}).`,
-            );
-            return;
+          if (product && product.stockQty < countChange) {
+            return ctx.reply(`Omborda yetarli mahsulot yo'q (Hozir: ${product.stockQty}).`);
           }
         }
 
         await this.prisma.product.update({
           where: { id: productId },
           data: {
-            count: isIncrement
+            stockQty: isIncrement
               ? { increment: countChange }
               : { decrement: countChange },
           },
         });
 
         await this.redis.deleteUserState(tgId);
-        await ctx.reply(
-          'Muvaffaqiyatli yangilandi.',
-          Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
-        );
+        await ctx.reply('Muvaffaqiyatli yangilandi.', this.getMainKeyboard(role));
         return;
       } catch (error) {
-        await ctx.reply('Xatolik yuz berdi.');
-        return;
+        return ctx.reply('Xatolik yuz berdi.');
       }
     }
 
+    // 6. Qolgan WAIT holatlari
     if (state && state.step.startsWith('WAIT_')) {
       switch (state.step) {
+        case 'WAIT_NEW_CATEGORY_NAME':
+          await this.handleCreateCategory(ctx, tgId, state, text);
+          break;
+
         case 'WAIT_NAME':
           state.data.name = text;
           state.step = 'WAIT_PRICE';
@@ -153,10 +186,7 @@ export class BotService {
           break;
 
         case 'WAIT_PRICE':
-          if (isNaN(Number(text))) {
-            await ctx.reply('Faqat raqam kiriting:');
-            return;
-          }
+          if (isNaN(Number(text))) return ctx.reply('Faqat raqam kiriting:');
           state.data.price = Number(text);
           state.step = 'WAIT_COUNT';
           await this.redis.setUserState(tgId, state);
@@ -164,11 +194,8 @@ export class BotService {
           break;
 
         case 'WAIT_COUNT':
-          if (isNaN(Number(text))) {
-            await ctx.reply('Faqat raqam kiriting:');
-            return;
-          }
-          state.data.count = Number(text);
+          if (isNaN(Number(text))) return ctx.reply('Faqat raqam kiriting:');
+          state.data.stockQty = Number(text);
           state.step = 'WAIT_PHOTOS';
           await this.redis.setUserState(tgId, state);
           await ctx.reply('Rasm yuboring (Max: 2).');
@@ -176,130 +203,464 @@ export class BotService {
 
         case 'WAIT_EDIT_NAME':
         case 'WAIT_EDIT_PRICE':
-        case 'WAIT_EDIT_COUNT':
-          const field = state.step.replace('WAIT_EDIT_', '').toLowerCase();
-          const pId = state.data.product_id;
-          let val: any = text;
+        case 'WAIT_EDIT_STOCK_QTY':
+          await this.handleEditField(ctx, tgId, state, text);
+          break;
 
-          if (field === 'price' || field === 'count') {
-            val = Number(text);
-            if (isNaN(val)) return ctx.reply('Faqat raqam kiriting:');
-          }
+        // Staff Management States
+        case 'WAIT_STAFF_NAME':
+          state.data.name = text; // Reuse field
+          state.step = 'WAIT_STAFF_TG_ID';
+          await this.redis.setUserState(tgId, state);
+          await ctx.reply('Ushbu xodimning Telegram ID raqamini yuboring (Masalan: 123456789):');
+          break;
 
-          try {
-            await this.prisma.product.update({
-              where: { id: pId },
-              data: { [field]: val },
-            });
-            await this.redis.deleteUserState(tgId);
-            await ctx.reply(
-              'Yangilandi.',
-              Markup.keyboard([
-                ["Yangi mahsulot qo'shish"],
-                ['Katalog'],
-              ]).resize(),
-            );
-          } catch (e) {
-            await ctx.reply('Xatolik.');
-          }
+        case 'WAIT_STAFF_TG_ID':
+          await this.handleCreateStaff(ctx, tgId, state, text);
+          break;
+
+        case 'WAIT_EDIT_STAFF_NAME':
+          await this.handleEditStaffName(ctx, tgId, state, text);
           break;
       }
-      return;
-    }
-
-    if (text === 'Katalog') {
-      await ctx.reply(
-        'Mahsulot turini tanlang:',
-        Markup.inlineKeyboard([
-          [
-            Markup.button.callback('Shina', 'browse_SHINA_1'),
-            Markup.button.callback('Akkumulyator', 'browse_AKKUMULYATOR_1'),
-          ],
-          [
-            Markup.button.callback('Disklar', 'browse_DISKLAR_1'),
-            Markup.button.callback('Extiyot qism', 'browse_EXTIYOT_QISM_1'),
-          ],
-          [Markup.button.callback('Kamera', 'browse_KAMERA_1')],
-        ]),
-      );
       return;
     }
 
     await this.searchProducts(ctx, text);
   }
 
-  @Action(/^browse_(.+)_(\d+)$/)
-  async onBrowse(@Ctx() ctx: any) {
-    const type = ctx.match[1] as ProductType;
-    const page = parseInt(ctx.match[2]);
+  // --- Category Logic ---
 
-    const { products, total, totalPages } = await this.prisma.product
-      .findMany({
-        where: { type },
+  @Action('add_cat_root')
+  async onAddCatRoot(@Ctx() ctx: any) {
+    const tgId = BigInt(ctx.from.id);
+    await this.redis.setUserState(tgId, {
+      step: 'WAIT_NEW_CATEGORY_NAME',
+      data: { photos: [], categoryId: null } as any,
+    });
+    await ctx.answerCbQuery();
+    await ctx.reply('Yangi kategoriya nomini kiriting:', Markup.keyboard([['Bekor qilish']]).resize());
+  }
+
+  @Action(/^add_subcat_(.+)$/)
+  async onAddSubCat(@Ctx() ctx: any) {
+    const parentId = ctx.match[1];
+    const tgId = BigInt(ctx.from.id);
+    await this.redis.setUserState(tgId, {
+      step: 'WAIT_NEW_CATEGORY_NAME',
+      data: { photos: [], categoryId: parentId } as any,
+    });
+    await ctx.answerCbQuery();
+    await ctx.reply('Yangi ichki kategoriya nomini kiriting:', Markup.keyboard([['Bekor qilish']]).resize());
+  }
+
+  async handleCreateCategory(ctx: Context, tgId: bigint, state: UserState, text: string) {
+    const parentId = state.data.categoryId;
+    const name = normalizeName(text);
+    try {
+      const category = await this.prisma.category.create({
+        data: {
+          name,
+          parentId: parentId || null,
+        },
+      });
+      await this.redis.deleteUserState(tgId);
+
+      const user = await this.getAdminByTgId(tgId);
+      await ctx.reply(
+        `Kategoriya "${name}" muvaffaqiyatli yaratildi. ✅`,
+        this.getMainKeyboard(user?.role),
+      );
+
+      // Stay in the same view
+      return this.showCategoryView(ctx, category.id, 1);
+    } catch (e) {
+      await ctx.reply('Kategoriya yaratishda xatolik.');
+    }
+  }
+
+  async showCategoryView(ctx: any, categoryId: string, page: number) {
+    const tgId = BigInt(ctx.from.id);
+    const user = await this.getAdminByTgId(tgId);
+    const role = user?.role;
+
+    const category = await this.prisma.category.findUnique({
+      where: { id: categoryId },
+      include: { parent: true },
+    });
+    if (!category) return;
+
+    const children = await this.prisma.category.findMany({
+      where: { parentId: categoryId },
+      orderBy: { name: 'asc' },
+    });
+
+    const [products, total] = await Promise.all([
+      this.prisma.product.findMany({
+        where: { categoryId },
         include: { photos: true },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * 10,
-        take: 10,
-      })
-      .then(async (res) => {
-        const count = await this.prisma.product.count({ where: { type } });
-        return {
-          products: res,
-          total: count,
-          totalPages: Math.ceil(count / 10),
-        };
-      });
+        skip: (page - 1) * 5,
+        take: 5,
+      }),
+      this.prisma.product.count({ where: { categoryId } }),
+    ]);
 
-    if (products.length === 0) {
-      return ctx.answerCbQuery("Bu bo'limda mahsulotlar topilmadi.");
-    }
+    const totalPages = Math.ceil(total / 5);
 
-    let messageText = `<b>${type} bo'limi</b> (Jami: ${total})\n\n`;
-    const productButtons: any[] = [];
-
-    for (let i = 0; i < products.length; i++) {
-      const p = products[i];
-      const num = (page - 1) * 10 + (i + 1);
-      messageText += `${num}. ${p.name} - ${p.price.toLocaleString()} $\n`;
-      productButtons.push(Markup.button.callback(`${num}`, `view_p_${p.id}`));
-    }
+    let messageText = `📂 <b>${category.name}</b>\n`;
+    if (category.parent) messageText += `⬆️ Yuqori: ${category.parent.name}\n`;
+    messageText += `------------------------\n\n`;
 
     const inlineButtons: any[][] = [];
-    // Mahsulot tugmalarini qatorlarga bo'lish (har qatorda 5 tadan)
-    for (let i = 0; i < productButtons.length; i += 5) {
-      inlineButtons.push(productButtons.slice(i, i + 5));
+
+    if (children.length > 0) {
+      messageText += `<b>Pastki bo'limlar:</b>\n`;
+      children.forEach((c) => {
+        inlineButtons.push([Markup.button.callback(`📁 ${c.name}`, `browse_cat_${c.id}_1`)]);
+      });
+      messageText += `\n`;
     }
 
-    // Navigatsiya tugmalari
+    if (products.length > 0) {
+      messageText += `<b>Mahsulotlar:</b> (Jami: ${total})\n`;
+      for (let i = 0; i < products.length; i++) {
+        const p = products[i];
+        const num = (page - 1) * 5 + (i + 1);
+        messageText += `${num}. ${p.name} - ${Number(p.price).toLocaleString()} $\n`;
+        inlineButtons.push([Markup.button.callback(`🛒 ${num}. ${p.name}`, `view_p_${p.id}`)]);
+      }
+    } else if (children.length === 0) {
+      messageText += `<i>Bu bo'limda mahsulotlar yo'q.</i>\n`;
+    }
+
+    if (role === 'super_admin' || role === 'admin') {
+      inlineButtons.push([Markup.button.callback("➕ Yangi ichki kategoriya", `add_subcat_${categoryId}`)]);
+    }
+
     const navButtons: any[] = [];
-    if (page > 1) {
-      navButtons.push(
-        Markup.button.callback('Oldingi', `browse_${type}_${page - 1}`),
-      );
-    }
-    navButtons.push(Markup.button.callback(`${page} / ${totalPages}`, 'noop'));
-    if (page < totalPages) {
-      navButtons.push(
-        Markup.button.callback('Keyingi', `browse_${type}_${page + 1}`),
-      );
-    }
+    if (page > 1) navButtons.push(Markup.button.callback('⬅️ Oldingi', `browse_cat_${categoryId}_${page - 1}`));
+    if (totalPages > 1) navButtons.push(Markup.button.callback(`${page} / ${totalPages}`, 'noop'));
+    if (page < totalPages) navButtons.push(Markup.button.callback('Keyingi ➡️', `browse_cat_${categoryId}_${page + 1}`));
+    if (navButtons.length > 0) inlineButtons.push(navButtons);
 
-    if (navButtons.length > 0) {
-      inlineButtons.push(navButtons);
-    }
+    const backBtn = category.parentId
+      ? Markup.button.callback('⬅️ Orqaga', `browse_cat_${category.parentId}_1`)
+      : Markup.button.callback('⬅️ Asosiy katalog', 'back_to_catalog');
+    inlineButtons.push([backBtn]);
 
-    try {
+    if (ctx.callbackQuery) {
       await ctx.editMessageText(messageText, {
         parse_mode: 'HTML',
         ...Markup.inlineKeyboard(inlineButtons),
       });
-    } catch (error) {
-      await ctx.replyWithHTML(
-        messageText,
-        Markup.inlineKeyboard(inlineButtons),
-      );
+    } else {
+      await ctx.replyWithHTML(messageText, Markup.inlineKeyboard(inlineButtons));
     }
+  }
+
+  @Action(/^browse_cat_(.+)_(\d+)$/)
+  async onBrowse(@Ctx() ctx: any) {
+    const categoryId = ctx.match[1];
+    const page = parseInt(ctx.match[2]);
+    await this.showCategoryView(ctx, categoryId, page);
     await ctx.answerCbQuery();
+  }
+
+  @Action('back_to_catalog')
+  async onBackToCatalog(@Ctx() ctx: any) {
+    const tgId = BigInt(ctx.from.id);
+    const user = await this.getAdminByTgId(tgId);
+    const categories = await this.prisma.category.findMany({
+      where: { parentId: null },
+    });
+
+    const buttons = categories.map((c) => [
+      Markup.button.callback(c.name, `browse_cat_${c.id}_1`),
+    ]);
+    if (user?.role === 'super_admin' || user?.role === 'admin') {
+      buttons.push([Markup.button.callback("➕ Yangi kategoriya qo'shish", 'add_cat_root')]);
+    }
+
+    await ctx.editMessageText('Kategoriyalarni tanlang:', Markup.inlineKeyboard(buttons));
+    await ctx.answerCbQuery();
+  }
+
+  // --- Staff Management Logic ---
+
+  @Action('add_staff_start')
+  async onAddStaffStart(@Ctx() ctx: any) {
+    const tgId = BigInt(ctx.from.id);
+    const user = await this.getAdminByTgId(tgId);
+    if (!user) return;
+
+    const buttons: any[] = [];
+    if (user.role === 'super_admin') {
+      buttons.push([Markup.button.callback('Admin', 'add_staff_role_admin')]);
+    }
+    buttons.push([Markup.button.callback('Staff', 'add_staff_role_staff')]);
+    buttons.push([Markup.button.callback('Bekor qilish', 'cancel_process')]);
+
+    await ctx.editMessageText(
+      'Yangi xodim uchun rolni tanlang:',
+      Markup.inlineKeyboard(buttons),
+    );
+    await ctx.answerCbQuery();
+  }
+
+  @Action(/^add_staff_role_(.+)$/)
+  async onSetStaffRole(@Ctx() ctx: any) {
+    const role = ctx.match[1];
+    const tgId = BigInt(ctx.from.id);
+
+    await this.redis.setUserState(tgId, {
+      step: 'WAIT_STAFF_NAME',
+      data: { photos: [], role } as any,
+    });
+
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      `Yangi ${role.toUpperCase()}ning to'liq ismini (F.I.O) kiriting:`,
+      Markup.keyboard([['Bekor qilish']]).resize(),
+    );
+  }
+
+  async handleCreateStaff(ctx: Context, tgId: bigint, state: UserState, text: string) {
+    const staffTgId = BigInt(text.trim());
+    if (isNaN(Number(staffTgId))) {
+      return ctx.reply('Iltimos, faqat raqamlardan iborat Telegram ID yuboring:');
+    }
+
+    const { role, name: fullName } = state.data as any;
+
+    try {
+      await this.prisma.admin.create({
+        data: {
+          telegramId: staffTgId,
+          fullName: normalizeName(fullName),
+          role: role,
+          isActive: true,
+        },
+      });
+
+      await this.redis.deleteUserState(tgId);
+      const user = await this.getAdminByTgId(tgId);
+      await ctx.reply(
+        `Yangi ${role.toUpperCase()} muvaffaqiyatli qo'shildi! ✅`,
+        this.getMainKeyboard(user?.role),
+      );
+    } catch (e) {
+      if (e.code === 'P2002') {
+        await ctx.reply('Ushbu Telegram ID allaqachon ro\'yxatdan o\'tgan! Iltimos, boshqa ID kiriting:');
+      } else {
+        await ctx.reply('Xodimni saqlashda xatolik yuz berdi.');
+      }
+    }
+  }
+
+  @Action('list_staff')
+  async onListStaff(@Ctx() ctx: any) {
+    const staff = await this.prisma.admin.findMany({
+      orderBy: { role: 'asc' },
+    });
+
+    const buttons = staff.map((s) => [
+      Markup.button.callback(`${s.fullName} (${s.role.toUpperCase()})`, `view_staff_${s.id}`),
+    ]);
+    buttons.push([Markup.button.callback('⬅️ Orqaga', 'cancel_process')]);
+
+    await ctx.editMessageText('👥 <b>Xodimlar ro\'yxati:</b>\nTanlash uchun bosing:', {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard(buttons),
+    });
+    await ctx.answerCbQuery();
+  }
+
+  @Action(/^view_staff_(.+)$/)
+  async onViewStaff(@Ctx() ctx: any) {
+    const staffId = ctx.match[1];
+    const staff = await this.prisma.admin.findUnique({ where: { id: staffId } });
+    if (!staff) return ctx.answerCbQuery('Xodim topilmadi');
+
+    const currentUser = await this.getAdminByTgId(BigInt(ctx.from.id));
+    if (!currentUser) return;
+
+    const canEdit = this.checkCanEdit(currentUser.role, staff.role, currentUser.id, staff.id);
+
+    let text = `👤 <b>Xodim ma'lumotlari:</b>\n\n`;
+    text += `Ism: <b>${staff.fullName}</b>\n`;
+    text += `Role: ${staff.role.toUpperCase()}\n`;
+    text += `Telegram ID: <code>${staff.telegramId}</code>\n`;
+    text += `Status: ${staff.isActive ? '✅ Faol' : '❌ Faol emas'}\n`;
+
+    const buttons: any[][] = [];
+    if (canEdit) {
+      buttons.push([
+        Markup.button.callback('📝 Ismni tahrirlash', `edit_staff_name_${staff.id}`),
+        Markup.button.callback(`${staff.isActive ? '🔴 Faolsizlantirish' : '🟢 Faollashtirish'}`, `toggle_staff_status_${staff.id}`),
+      ]);
+      
+      const roleButtons: any[] = [];
+      if (currentUser.role === 'super_admin') {
+        if (staff.role !== 'admin') roleButtons.push(Markup.button.callback('➡️ Admin qilish', `set_staff_role_admin_${staff.id}`));
+        if (staff.role !== 'staff') roleButtons.push(Markup.button.callback('➡️ Staff qilish', `set_staff_role_staff_${staff.id}`));
+      } else if (currentUser.role === 'admin' && staff.role !== 'staff') {
+        roleButtons.push(Markup.button.callback('➡️ Staff qilish', `set_staff_role_staff_${staff.id}`));
+      }
+      if (roleButtons.length > 0) buttons.push(roleButtons);
+    }
+    
+    buttons.push([Markup.button.callback('⬅️ Ro\'yxatga qaytish', 'list_staff')]);
+
+    await ctx.editMessageText(text, {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard(buttons),
+    });
+    await ctx.answerCbQuery();
+  }
+
+  private checkCanEdit(actorRole: string, targetRole: string, actorId: string, targetId: string): boolean {
+    if (actorId === targetId) return false;
+    if (actorRole === 'super_admin' && (targetRole === 'admin' || targetRole === 'staff')) return true;
+    if (actorRole === 'admin' && targetRole === 'staff') return true;
+    return false;
+  }
+
+  @Action(/^toggle_staff_status_(.+)$/)
+  async onToggleStaffStatus(@Ctx() ctx: any) {
+    const staffId = ctx.match[1];
+    const staff = await this.prisma.admin.findUnique({ where: { id: staffId } });
+    if (!staff) return ctx.answerCbQuery('Xodim topilmadi');
+
+    const currentUser = await this.getAdminByTgId(BigInt(ctx.from.id));
+    if (!currentUser || !this.checkCanEdit(currentUser.role, staff.role, currentUser.id, staff.id)) {
+      return ctx.answerCbQuery('Ruxsat yo\'q');
+    }
+
+    await this.prisma.admin.update({
+      where: { id: staffId },
+      data: { isActive: !staff.isActive },
+    });
+
+    await ctx.answerCbQuery(`Status o'zgartirildi: ${!staff.isActive ? 'Faol' : 'Faol emas'}`);
+    return this.onViewStaff(ctx);
+  }
+
+  @Action(/^set_staff_role_(admin|staff)_(.+)$/)
+  async onSetStaffRoleUpdate(@Ctx() ctx: any) {
+    const newRole = ctx.match[1];
+    const staffId = ctx.match[2];
+    const staff = await this.prisma.admin.findUnique({ where: { id: staffId } });
+    if (!staff) return ctx.answerCbQuery('Xodim topilmadi');
+
+    const currentUser = await this.getAdminByTgId(BigInt(ctx.from.id));
+    if (!currentUser || !this.checkCanEdit(currentUser.role, staff.role, currentUser.id, staff.id)) {
+      return ctx.answerCbQuery('Ruxsat yo\'q');
+    }
+
+    // Role check for specific transitions
+    if (currentUser.role === 'admin' && newRole !== 'staff') {
+      return ctx.answerCbQuery('Admin faqat staff tayinlashi mumkin');
+    }
+
+    await this.prisma.admin.update({
+      where: { id: staffId },
+      data: { role: newRole as Role },
+    });
+
+    await ctx.answerCbQuery(`Rol o'zgartirildi: ${newRole.toUpperCase()}`);
+  }
+
+  @Action(/^edit_staff_name_(.+)$/)
+  async onEditStaffNameStart(@Ctx() ctx: any) {
+    const staffId = ctx.match[1];
+    const staff = await this.prisma.admin.findUnique({ where: { id: staffId } });
+    if (!staff) return ctx.answerCbQuery('Xodim topilmadi');
+
+    const currentUser = await this.getAdminByTgId(BigInt(ctx.from.id));
+    if (!currentUser || !this.checkCanEdit(currentUser.role, staff.role, currentUser.id, staff.id)) {
+      return ctx.answerCbQuery('Ruxsat yo\'q');
+    }
+
+    await this.redis.setUserState(BigInt(ctx.from.id), {
+      step: 'WAIT_EDIT_STAFF_NAME',
+      data: { staff_id: staffId } as any,
+    });
+
+    await ctx.answerCbQuery();
+    await ctx.reply(`<b>${staff.fullName}</b> uchun yangi ism kiriting:`, {
+      parse_mode: 'HTML',
+      ...Markup.keyboard([['Bekor qilish']]).resize(),
+    });
+  }
+
+  async handleEditStaffName(ctx: Context, tgId: bigint, state: UserState, text: string) {
+    const staffId = (state.data as any).staff_id;
+    const name = normalizeName(text);
+
+    try {
+      await this.prisma.admin.update({
+        where: { id: staffId },
+        data: { fullName: name },
+      });
+
+      await this.redis.deleteUserState(tgId);
+      const user = await this.getAdminByTgId(tgId);
+      await ctx.reply(`Xodim ismi o'zgartirildi: ${name} ✅`, this.getMainKeyboard(user?.role));
+      
+      // We can't easily return to the view message because it's in history, 
+      // but we can send a new view or just leave it at the keyboard.
+    } catch (e) {
+      await ctx.reply('Xatolik yuz berdi.');
+    }
+  }
+
+  // --- Product Logic ---
+
+  @Action(/^set_cat_(.+)$/)
+  async onSetCategory(@Ctx() ctx: any) {
+    const categoryId = ctx.match[1];
+    const tgId = BigInt(ctx.from.id);
+    const state = await this.redis.getUserState(tgId);
+
+    if (state && state.step === 'WAIT_CATEGORY') {
+      const subCategories = await this.prisma.category.findMany({
+        where: { parentId: categoryId },
+      });
+
+      if (subCategories.length > 0) {
+        const buttons = subCategories.map((c) => [
+          Markup.button.callback(c.name, `set_cat_${c.id}`),
+        ]);
+        const currentCat = await this.prisma.category.findUnique({ where: { id: categoryId } });
+        const backBtn = currentCat?.parentId
+          ? Markup.button.callback('⬅️ Orqaga', `set_cat_${currentCat.parentId}`)
+          : Markup.button.callback('⬅️ Boshiga', 'reset_category_selection');
+
+        buttons.push([backBtn]);
+
+        await ctx.editMessageText(
+          `<b>${currentCat?.name}</b> ichidan tanlang:`,
+          { parse_mode: 'HTML', ...Markup.inlineKeyboard(buttons) }
+        );
+        return;
+      }
+
+      state.data.categoryId = categoryId;
+      state.step = 'WAIT_NAME';
+      await this.redis.setUserState(tgId, state);
+      await ctx.answerCbQuery();
+      await ctx.editMessageText('Kategoriya tanlandi ✅');
+      await ctx.reply('Mahsulot nomini kiriting:', Markup.keyboard([['Bekor qilish']]).resize());
+    }
+  }
+
+  @Action('reset_category_selection')
+  async onResetCategorySelection(@Ctx() ctx: any) {
+    const categories = await this.prisma.category.findMany({ where: { parentId: null } });
+    const buttons = categories.map((c) => [Markup.button.callback(c.name, `set_cat_${c.id}`)]);
+    buttons.push([Markup.button.callback('Bekor qilish', 'cancel_process')]);
+    await ctx.editMessageText('Kategoriyani tanlang:', Markup.inlineKeyboard(buttons));
   }
 
   @Action(/^view_p_(.+)$/)
@@ -307,35 +668,72 @@ export class BotService {
     const pId = ctx.match[1];
     const p = await this.prisma.product.findUnique({
       where: { id: pId },
-      include: { photos: true },
+      include: { photos: true, category: true },
     });
     if (!p) return ctx.answerCbQuery('Topilmadi');
 
-    const caption = `<b>${p.name}</b>\nTur: ${p.type}\nNarx: ${p.price}\nSoni: ${p.count}`;
+    const caption = `<b>${p.name}</b>\nKategoriya: ${p.category.name}\nNarx: ${Number(p.price)} $\nSoni: ${p.stockQty} ${p.unit}`;
+
     if (p.photos.length > 0) {
-      await ctx.replyWithMediaGroup(
-        p.photos.map((ph) => ({ type: 'photo', media: ph.url })) as any,
-      );
+      try {
+        await ctx.replyWithMediaGroup(
+          p.photos.map((ph) => ({ type: 'photo', media: ph.url })) as any,
+        );
+      } catch (e) { }
     }
 
-    const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
+    const user = await this.getAdminByTgId(BigInt(ctx.from.id));
+    const role = user?.role;
     let markup: any = {};
-    if (isAdmin) {
+    if (role === 'super_admin' || role === 'admin' || role === 'staff') {
       markup = Markup.inlineKeyboard([
         [
           Markup.button.callback('-', `dec_p_${p.id}`),
           Markup.button.callback('Edit', `edit_p_${p.id}`),
           Markup.button.callback('+', `inc_p_${p.id}`),
         ],
-        [
-          Markup.button.callback("O'chirish", `del_p_${p.id}`),
-        ],
+        [Markup.button.callback("❌ O'chirish", `del_p_${p.id}`)],
       ]);
     }
     await ctx.replyWithHTML(caption, markup);
     await ctx.answerCbQuery();
   }
-  
+
+  // --- Handlers & Helpers ---
+
+  async handleEditField(ctx: Context, tgId: bigint, state: UserState, text: string) {
+    const rawField = state.step.replace('WAIT_EDIT_', '').toLowerCase();
+    const field = rawField === 'stock_qty' ? 'stockQty' : rawField;
+    const pId = state.data.product_id;
+    let val: any = text;
+
+    if (field === 'price' || field === 'stockQty') {
+      val = Number(val);
+      if (isNaN(val)) return ctx.reply('Faqat raqam kiriting:');
+      if (field === 'price') val = new Prisma.Decimal(val);
+    }
+
+    try {
+      await this.prisma.product.update({
+        where: { id: pId },
+        data: { [field]: val },
+      });
+      await this.redis.deleteUserState(tgId);
+      const user = await this.getAdminByTgId(tgId);
+      await ctx.reply('Yangilandi ✅', this.getMainKeyboard(user?.role));
+    } catch (e) {
+      await ctx.reply('Xatolik yuz berdi.');
+    }
+  }
+
+  getMainKeyboard(role?: string) {
+    const buttons = [['Katalog'], ["Yangi mahsulot qo'shish"]];
+    if (role === 'super_admin' || role === 'admin') {
+      buttons.push(['Xodimlarni boshqarish']);
+    }
+    return Markup.keyboard(buttons).resize();
+  }
+
   @Action(/^del_p_(.+)$/)
   async onDelete(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -344,13 +742,13 @@ export class BotService {
       "Rostdan ham o'chirmoqchimisiz?",
       Markup.inlineKeyboard([
         [
-          Markup.button.callback('Ha', `confirm_del_${pId}`),
-          Markup.button.callback("Yo'q", 'cancel_process'),
+          Markup.button.callback('✅ Ha', `confirm_del_${pId}`),
+          Markup.button.callback("❌ Yo'q", 'cancel_process'),
         ],
       ]),
     );
   }
-  
+
   @Action(/^confirm_del_(.+)$/)
   async onConfirmDelete(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -362,7 +760,7 @@ export class BotService {
       await ctx.reply('Xatolik');
     }
   }
-  
+
   @Action(/^edit_photo_(.+)$/)
   async onEditPhotoStart(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -380,17 +778,13 @@ export class BotService {
     const state = await this.redis.getUserState(tgId);
     if (!state || state.data.photos.length === 0)
       return ctx.answerCbQuery('Kamida 1 ta rasm!');
-    
+
     await ctx.editMessageText('Rasmlar yangilanmoqda...');
     try {
-      if (!state.data.product_id)
-        return ctx.answerCbQuery('Xato: ID topilmadi');
-      await this.updateProductPhotos(state.data.product_id, state.data.photos);
+      await this.updateProductPhotos(state.data.product_id!, state.data.photos);
       await this.redis.deleteUserState(tgId);
-      await ctx.reply(
-        'Rasmlar yangilandi.',
-        Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
-      );
+      const user = await this.getAdminByTgId(tgId);
+      await ctx.reply('Rasmlar yangilandi ✅', this.getMainKeyboard(user?.role));
       await ctx.answerCbQuery();
     } catch (e) {
       await ctx.reply('Xatolik');
@@ -398,27 +792,21 @@ export class BotService {
   }
 
   async updateProductPhotos(pId: string, tgFileIds: string[]) {
-    // 1. Eskilarini o'chirish
     const product = await this.prisma.product.findUnique({
       where: { id: pId },
       include: { photos: true },
     });
     if (product?.photos) {
       for (const ph of product.photos) {
-        await this.productsService.deletePhoto(ph.publicId).catch(() => {});
-        }
-      // DB dan rasmlarni o'chirish
+        await this.productsService.deletePhoto(ph.publicId).catch(() => { });
+      }
       await this.prisma.photo.deleteMany({ where: { productId: pId } });
     }
-    
-    // 2. Yangilarini yuklash
+
     const token = this.configService.get<string>('BOT_TOKEN') as string;
     const newPhotos: any[] = [];
     for (const id of tgFileIds) {
-      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(
-        id,
-        token,
-      );
+      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(id, token);
       newPhotos.push({ url: res.url, publicId: res.publicId });
     }
     await this.prisma.product.update({
@@ -426,30 +814,12 @@ export class BotService {
       data: { photos: { create: newPhotos } },
     });
   }
-  
+
   @Action('noop')
   async onNoop(@Ctx() ctx: any) {
     await ctx.answerCbQuery();
   }
-  
-  @Action(/^set_type_(.+)$/)
-  async onSetType(@Ctx() ctx: any) {
-    const type = ctx.match[1] as ProductType;
-    const tgId = BigInt(ctx.from.id);
-    const state = await this.redis.getUserState(tgId);
-    
-    if (state && state.step === 'WAIT_TYPE') {
-      state.data.type = type;
-      state.step = 'WAIT_NAME';
-      await this.redis.setUserState(tgId, state);
-      await ctx.answerCbQuery();
-      await ctx.reply(
-        'Mahsulot nomini kiriting:',
-        Markup.keyboard([['Bekor qilish']]).resize(),
-      );
-    }
-  }
-  
+
   @Action('cancel_process')
   async onCancel(@Ctx() ctx: any) {
     const tgId = BigInt(ctx.from.id);
@@ -457,7 +827,7 @@ export class BotService {
     await ctx.answerCbQuery('Bekor qilindi');
     await ctx.editMessageText("Jarayon to'xtatildi.");
   }
-  
+
   @On('photo')
   async onPhoto(@Ctx() ctx: Context) {
     const tgId = BigInt(ctx.from?.id || 0);
@@ -473,20 +843,22 @@ export class BotService {
       if (!photos || photos.length === 0) return;
       const fileId = photos[photos.length - 1].file_id;
       if (state.data.photos.length >= 2) return ctx.reply('Max: 2 ta rasm!');
-      
+
       state.data.photos.push(fileId);
       await this.redis.setUserState(tgId, state);
-      
+
       const len = state.data.photos.length;
       await ctx.reply(
         `${len}-rasm qabul qilindi.`,
         Markup.inlineKeyboard([
-          Markup.button.callback(
-            'Saqlash',
-            state.step === 'WAIT_EDIT_PHOTO'
-            ? 'finalize_photo_edit'
-            : 'finalize_product',
-          ),
+          [
+            Markup.button.callback(
+              'Saqlash',
+              state.step === 'WAIT_EDIT_PHOTO'
+                ? 'finalize_photo_edit'
+                : 'finalize_product',
+            ),
+          ]
         ]),
       );
     }
@@ -497,43 +869,55 @@ export class BotService {
     if (!ctx.from) return;
     const tgId = BigInt(ctx.from.id);
     const state = await this.redis.getUserState(tgId);
-    
+
     if (!state || state.data.photos.length === 0)
       return ctx.answerCbQuery('Rasm yuklang!');
 
     await ctx.editMessageText('Saqlanmoqda...');
     try {
-      await this.createProductFromBot(state.data as any, state.data.photos);
+      const user = await this.getAdminByTgId(tgId);
+      if (!user) throw new Error('User not found');
+
+      const payload: CreateProductDto = {
+        name: state.data.name!,
+        categoryId: state.data.categoryId!,
+        price: state.data.price!,
+        stockQty: state.data.stockQty!,
+        createdById: user.id,
+        unit: state.data.unit || 'dona',
+      };
+
+      await this.createProductFromBot(payload, state.data.photos);
       await this.redis.deleteUserState(tgId);
-      await ctx.reply(
-        "Muvaffaqiyatli qo'shildi.",
-        Markup.keyboard([["Yangi mahsulot qo'shish"], ['Katalog']]).resize(),
-      );
+      await ctx.reply("Muvaffaqiyatli qo'shildi ✅", this.getMainKeyboard(user.role));
     } catch (e) {
-      await ctx.reply('Xatolik.');
+      await ctx.reply('Xatolik yuz berdi saqlashda.');
     }
   }
-  
+
   private async searchProducts(ctx: Context, query: string) {
     if (!ctx.from) return;
-    const isAdmin = await this.getAdminByTgId(BigInt(ctx.from.id));
+    const user = await this.getAdminByTgId(BigInt(ctx.from.id));
+    const role = user?.role;
     const products = await this.prisma.product.findMany({
       where: { name: { contains: query, mode: 'insensitive' } },
-      include: { photos: true },
+      include: { photos: true, category: true },
       take: 5,
     });
 
     if (products.length === 0) return ctx.reply('Topilmadi.');
-    
+
     for (const p of products) {
-      const caption = `<b>${p.name}</b>\nTur: ${p.type}\nNarx: ${p.price}\nSoni: ${p.count}`;
+      const caption = `<b>${p.name}</b>\nKategoriya: ${p.category.name}\nNarx: ${Number(p.price)} $\nSoni: ${p.stockQty} ${p.unit}`;
       if (p.photos.length > 0) {
-        await ctx.replyWithMediaGroup(
-          p.photos.map((ph) => ({ type: 'photo', media: ph.url })) as any,
-        );
+        try {
+          await ctx.replyWithMediaGroup(
+            p.photos.map((ph) => ({ type: 'photo', media: ph.url })) as any,
+          );
+        } catch (e) { }
       }
       let markup: any = {};
-      if (isAdmin) {
+      if (role === 'super_admin' || role === 'admin' || role === 'staff') {
         markup = Markup.inlineKeyboard([
           [
             Markup.button.callback('-', `dec_p_${p.id}`),
@@ -554,9 +938,9 @@ export class BotService {
       data: { product_id: pId, photos: [] },
     });
     await ctx.answerCbQuery();
-    await ctx.reply("Qancha qo'shish kerak?");
+    await ctx.reply("Qancha qo'shish kerak?", Markup.keyboard([['Bekor qilish']]).resize());
   }
-  
+
   @Action(/^dec_p_(.+)$/)
   async onDec(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -565,9 +949,9 @@ export class BotService {
       data: { product_id: pId, photos: [] },
     });
     await ctx.answerCbQuery();
-    await ctx.reply('Qancha ayirish kerak?');
+    await ctx.reply('Qancha ayirish kerak?', Markup.keyboard([['Bekor qilish']]).resize());
   }
-  
+
   @Action(/^edit_p_(.+)$/)
   async onEditStart(@Ctx() ctx: any) {
     const pId = ctx.match[1];
@@ -582,39 +966,45 @@ export class BotService {
         [
           Markup.button.callback('Nom', 'edit_name'),
           Markup.button.callback('Narx', 'edit_price'),
-          Markup.button.callback('Son', 'edit_count'),
+          Markup.button.callback('Soni', 'edit_stock_qty'),
           Markup.button.callback('Rasm', `edit_photo_${pId}`),
         ],
+        [Markup.button.callback('Bekor qilish', 'cancel_process')],
       ]),
     );
   }
 
-  @Action(/^edit_(name|price|count)$/)
+  @Action(/^edit_(name|price|stock_qty)$/)
   async onFieldSelect(@Ctx() ctx: any) {
     const state = await this.redis.getUserState(BigInt(ctx.from.id));
     if (!state) return ctx.answerCbQuery('Xato');
     state.step = `WAIT_EDIT_${ctx.match[1].toUpperCase()}`;
     await this.redis.setUserState(BigInt(ctx.from.id), state);
     await ctx.answerCbQuery();
-    await ctx.reply('Yangi qiymatni kiriting:');
+    await ctx.reply('Yangi qiymatni kiriting:', Markup.keyboard([['Bekor qilish']]).resize());
   }
 
   async getAdminByTgId(id: bigint) {
-    return this.prisma.admin.findUnique({ where: { telegram_id: id } });
+    return this.prisma.admin.findUnique({ where: { telegramId: id } });
   }
 
   async createProductFromBot(payload: CreateProductDto, tgFileIds: string[]) {
     const token = this.configService.get<string>('BOT_TOKEN') as string;
     const photos: any[] = [];
     for (const id of tgFileIds) {
-      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(
-        id,
-        token,
-      );
+      const res = await this.mediaservice.uploadTelegramPhotoToCloudinary(id, token);
       photos.push({ url: res.url, publicId: res.publicId });
     }
     return this.prisma.product.create({
-      data: { ...payload, photos: { create: photos } },
+      data: {
+        name: normalizeName(payload.name),
+        categoryId: payload.categoryId,
+        createdById: payload.createdById,
+        price: new Prisma.Decimal(payload.price),
+        stockQty: payload.stockQty,
+        unit: payload.unit,
+        photos: { create: photos }
+      },
     });
   }
 }

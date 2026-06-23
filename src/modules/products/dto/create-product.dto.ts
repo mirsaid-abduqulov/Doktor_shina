@@ -1,24 +1,37 @@
-// create-tire.dto.ts
 import { Type } from 'class-transformer';
-import { IsString, IsNumber, Min, IsNotEmpty, IsEnum } from 'class-validator';
-import { ProductType } from '@prisma/client';
+import { IsString, IsNumber, Min, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateProductDto {
+  @ApiProperty({ example: 'Michelin Pilot Sport 4' })
   @IsString()
   @IsNotEmpty()
   name: string;
 
-  @IsEnum(ProductType)
+  @ApiProperty({ example: 'uuid-category-id' })
+  @IsUUID()
   @IsNotEmpty()
-  type: ProductType;
+  categoryId: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 }) // Verguldan keyin 2 ta raqamgacha ruxsat
+  @ApiProperty({ example: 'uuid-admin-id' })
+  @IsUUID()
+  @IsNotEmpty()
+  createdById: string;
+
+  @ApiProperty({ example: 120.50 })
+  @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  @Type(() => Number) // BU JUDA MUHIM: Stringni Numberga o'giradi
+  @Type(() => Number)
   price: number;
 
+  @ApiProperty({ example: 4, default: 0 })
   @IsNumber()
   @Min(0)
-  @Type(() => Number) // String bo'lib kelgan sonni Numberga o'giradi
-  count: number;
+  @Type(() => Number)
+  stockQty: number;
+
+  @ApiProperty({ example: 'dona', default: 'dona' })
+  @IsString()
+  @IsOptional()
+  unit?: string;
 }
