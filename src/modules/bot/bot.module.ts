@@ -6,6 +6,7 @@ import { TelegrafModule } from 'nestjs-telegraf';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { RedisModule } from '../redis/redis.module';
 import { ProductsModule } from '../products/products.module';
+import { CategoriesModule } from '../categories/categories.module';
 
 @Module({
   controllers: [],
@@ -16,6 +17,7 @@ import { ProductsModule } from '../products/products.module';
     MediaModule,
     ConfigModule,
     ProductsModule,
+    CategoriesModule,
     TelegrafModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

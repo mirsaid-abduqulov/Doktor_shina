@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 import { normalize } from 'path';
 import { normalizeName } from '../admins/admins.service';
 import { Role } from '../admins/dto/create-admin.dto';
+import { CategoriesService } from '../categories/categories.service';
 
 @Update()
 @Injectable()
@@ -22,6 +23,7 @@ export class BotService {
     private readonly mediaservice: MediaService,
     private readonly redis: RedisService,
     private readonly productsService: ProductsService,
+    private readonly categoriesService: CategoriesService,
   ) { }
 
   @Start()
@@ -113,7 +115,7 @@ export class BotService {
       });
 
       if (categories.length === 0) {
-        return ctx.reply("Hali kategoriyalar yo'q.");
+        await ctx.reply("Hali kategoriyalar yo'q.");
       }
 
       const buttons = categories.map((c) => [
@@ -122,6 +124,10 @@ export class BotService {
 
       if (role === 'super_admin' || role === 'admin') {
         buttons.push([Markup.button.callback("➕ Yangi kategoriya qo'shish", 'add_cat_root')]);
+        buttons.push([
+          Markup.button.callback("✏️ Tahrirlash", 'edit_cat_list_root'),
+          Markup.button.callback("🗑️ O'chirish", 'delete_cat_list_root')
+        ]);
       }
 
       await ctx.reply(
@@ -207,6 +213,10 @@ export class BotService {
           await this.handleEditField(ctx, tgId, state, text);
           break;
 
+        case 'WAIT_EDIT_CATEGORY_NAME':
+          await this.handleEditCategoryName(ctx, tgId, state, text);
+          break;
+
         // Staff Management States
         case 'WAIT_STAFF_NAME':
           state.data.name = text; // Reuse field
@@ -279,6 +289,129 @@ export class BotService {
     }
   }
 
+  @Action('edit_cat_list_root')
+  async onEditCatListRoot(@Ctx() ctx: any) {
+    const categories = await this.prisma.category.findMany({
+      where: { parentId: null },
+      orderBy: { name: 'asc' },
+    });
+
+    const buttons = categories.map((c) => [
+      Markup.button.callback(`✏️ ${c.name}`, `edit_cat_start_${c.id}`),
+    ]);
+    buttons.push([Markup.button.callback('⬅️ Orqaga', 'back_to_catalog')]);
+
+    await ctx.editMessageText('Tahrirlash uchun kategoriyani tanlang:', Markup.inlineKeyboard(buttons));
+    await ctx.answerCbQuery();
+  }
+
+  @Action('delete_cat_list_root')
+  async onDeleteCatListRoot(@Ctx() ctx: any) {
+    const categories = await this.prisma.category.findMany({
+      where: { parentId: null },
+      orderBy: { name: 'asc' },
+    });
+
+    const buttons = categories.map((c) => [
+      Markup.button.callback(`🗑️ ${c.name}`, `delete_cat_confirm_${c.id}`),
+    ]);
+    buttons.push([Markup.button.callback('⬅️ Orqaga', 'back_to_catalog')]);
+
+    await ctx.editMessageText('O\'chirish uchun kategoriyani tanlang:', Markup.inlineKeyboard(buttons));
+    await ctx.answerCbQuery();
+  }
+
+  @Action(/^edit_cat_start_(.+)$/)
+  async onEditCatStart(@Ctx() ctx: any) {
+    const categoryId = ctx.match[1];
+    const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
+    if (!category) return ctx.answerCbQuery('Kategoriya topilmadi');
+
+    await this.redis.setUserState(BigInt(ctx.from.id), {
+      step: 'WAIT_EDIT_CATEGORY_NAME',
+      data: { categoryId } as any,
+    });
+
+    await ctx.answerCbQuery();
+    await ctx.reply(
+      `<b>${category.name}</b> uchun yangi nom kiriting:`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.keyboard([['Bekor qilish']]).resize(),
+      }
+    );
+  }
+
+  async handleEditCategoryName(ctx: Context, tgId: bigint, state: UserState, text: string) {
+    const categoryId = (state.data as any).categoryId;
+    const name = normalizeName(text);
+
+    try {
+      await this.categoriesService.update(categoryId, { name });
+      await this.redis.deleteUserState(tgId);
+      const user = await this.getAdminByTgId(tgId);
+      await ctx.reply(`Kategoriya nomi o'zgartirildi: ${name} ✅`, this.getMainKeyboard(user?.role));
+      return this.showCategoryView(ctx, categoryId, 1);
+    } catch (e) {
+      await ctx.reply('Xatolik yuz berdi.');
+    }
+  }
+
+  @Action(/^delete_cat_confirm_(.+)$/)
+  async onDeleteCatConfirm(@Ctx() ctx: any) {
+    const categoryId = ctx.match[1];
+    const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
+    if (!category) return ctx.answerCbQuery('Kategoriya topilmadi');
+
+    await ctx.editMessageText(
+      `Rostdan ham <b>${category.name}</b> kategoriyasini o'chirmoqchimisiz?`,
+      {
+        parse_mode: 'HTML',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('✅ Ha', `delete_cat_execute_${categoryId}`),
+            Markup.button.callback('❌ Yo\'q', `browse_cat_${categoryId}_1`),
+          ],
+        ]),
+      }
+    );
+    await ctx.answerCbQuery();
+  }
+
+  @Action(/^delete_cat_execute_(.+)$/)
+  async onDeleteCatExecute(@Ctx() ctx: any) {
+    const categoryId = ctx.match[1];
+    try {
+      await this.categoriesService.remove(categoryId);
+      await ctx.editMessageText('Kategoriya o\'chirildi ✅');
+      await ctx.answerCbQuery();
+      
+      // Go back to catalog or parent
+      const tgId = BigInt(ctx.from.id);
+      const user = await this.getAdminByTgId(tgId);
+      const categories = await this.prisma.category.findMany({
+        where: { parentId: null },
+      });
+
+      const buttons = categories.map((c) => [
+        Markup.button.callback(c.name, `browse_cat_${c.id}_1`),
+      ]);
+      if (user?.role === 'super_admin' || user?.role === 'admin') {
+        buttons.push([Markup.button.callback("➕ Yangi kategoriya qo'shish", 'add_cat_root')]);
+        buttons.push([
+          Markup.button.callback("✏️ Tahrirlash", 'edit_cat_list_root'),
+          Markup.button.callback("🗑️ O'chirish", 'delete_cat_list_root')
+        ]);
+      }
+
+      await ctx.reply('Asosiy katalog:', Markup.inlineKeyboard(buttons));
+
+    } catch (e) {
+      const message = e.response?.message || 'Xatolik yuz berdi. Kategoriyada mahsulotlar yoki ichki bo\'limlar bo\'lishi mumkin.';
+      await ctx.answerCbQuery(message, { show_alert: true });
+    }
+  }
+
   async showCategoryView(ctx: any, categoryId: string, page: number) {
     const tgId = BigInt(ctx.from.id);
     const user = await this.getAdminByTgId(tgId);
@@ -335,7 +468,13 @@ export class BotService {
     }
 
     if (role === 'super_admin' || role === 'admin') {
-      inlineButtons.push([Markup.button.callback("➕ Yangi ichki kategoriya", `add_subcat_${categoryId}`)]);
+      inlineButtons.push([
+        Markup.button.callback("➕ Yangi ichki kategoriya", `add_subcat_${categoryId}`),
+      ]);
+      inlineButtons.push([
+        Markup.button.callback("✏️ Kategoriyani tahrirlash", `edit_cat_start_${categoryId}`),
+        Markup.button.callback("🗑️ Kategoriyani o'chirish", `delete_cat_confirm_${categoryId}`),
+      ]);
     }
 
     const navButtons: any[] = [];
@@ -380,6 +519,10 @@ export class BotService {
     ]);
     if (user?.role === 'super_admin' || user?.role === 'admin') {
       buttons.push([Markup.button.callback("➕ Yangi kategoriya qo'shish", 'add_cat_root')]);
+      buttons.push([
+        Markup.button.callback("✏️ Tahrirlash", 'edit_cat_list_root'),
+        Markup.button.callback("🗑️ O'chirish", 'delete_cat_list_root')
+      ]);
     }
 
     await ctx.editMessageText('Kategoriyalarni tanlang:', Markup.inlineKeyboard(buttons));
