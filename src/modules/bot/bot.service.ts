@@ -793,8 +793,9 @@ export class BotService {
       state.data.categoryId = categoryId;
       state.step = 'WAIT_NAME';
       await this.redis.setUserState(tgId, state);
+      const currentCat = await this.prisma.category.findUnique({ where: { id: categoryId } });
       await ctx.answerCbQuery();
-      await ctx.editMessageText('Kategoriya tanlandi ✅');
+      await ctx.editMessageText(`${currentCat?.name} kategoriya tanlandi ✅`);
       await ctx.reply('Mahsulot nomini kiriting:', Markup.keyboard([['Bekor qilish']]).resize());
     }
   }
