@@ -569,10 +569,11 @@ export class BotService {
   }
 
   async handleCreateStaff(ctx: Context, tgId: bigint, state: UserState, text: string) {
-    const staffTgId = BigInt(text.trim());
-    if (isNaN(Number(staffTgId))) {
+    const trimmed = text.trim();
+    if (!/^\d+$/.test(trimmed)) {
       return ctx.reply('Iltimos, faqat raqamlardan iborat Telegram ID yuboring:');
     }
+    const staffTgId = BigInt(trimmed);
 
     const { role, name: fullName } = state.data as any;
 
